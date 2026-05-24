@@ -14,7 +14,7 @@ from PIL import Image
 # 내부 모듈
 from db_manager import *
 from ai_service import *
-from messaging import send_solapi_message
+from messaging import send_solapi_message, send_message, send_kakao_alimtalk, check_solapi_balance
 
 # ─── 페이지 설정 ─────────────────────────────────────────────
 st.set_page_config(
@@ -97,10 +97,10 @@ with st.sidebar:
         st.markdown("**🔑 API 키**")
         gemini_api_key = st.text_input(
             "Google Gemini API 키",
-            value="AIzaSyD09hiLSytx9ssdYxphAvMWJ8JZChTpdaI",
+            value=os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", "")),
             type="password",
             key="gemini_key_input",
-            help="gemini-2.5-flash 모델 사용. 변경하려면 수정하세요."
+            help="Gemini API 키를 입력하세요. ai.google.dev에서 무료 발급 가능"
         )
         solapi_api_key = st.text_input(
             "솔라피 API Key",
@@ -265,6 +265,102 @@ if menu == "📊 대시보드 & 출석 관리":
                     st.caption(f"✔ 오늘: {today_att['status']}")
     else:
         st.info("해당 반에 등록된 학생이 없습니다.")
+    
+    # ─── 학생/반 관리 섹션 ───
+    st.divider()
+    st.markdown("<div class='sub-header'>👤 학생 및 반 관리</div>", unsafe_allow_html=True)
+    
+    tab_m1, tab_m2, tab_m3 = st.tabs(["➕ 새 학생 등록", "✏️ 학생 정보 수정", "📋 반 관리"])
+    
+    # 탭 1: 새 학생 등록
+    with tab_m1:
+        st.markdown("**새 학생 등록**")
+        col1, col2 = st.columns(2)
+        with col1:
+            new_name = st.text_input("이름", placeholder="학생 이름", key="new_name")
+            new_phone = st.text_input("연락처", placeholder="010-0000-0000", key="new_phone")
+            new_parent_phone = st.text_input("학부모 연락처", placeholder="010-0000-0000 (선택)", key="new_parent")
+        with col2:
+            new_class = st.selectbox(
+                "반 선택",
+                {c["name"]: c["id"] for c in all_classes},
+                format_func=lambda x: x,
+                key="new_class"
+            )
+            new_sessions = st.number_input("수업 횟수", min_value=1, max_value=100, value=8, key="new_sessions")
+        
+        if st.button("✅ 학생 등록", use_container_width=True, type="primary", key="btn_add_student"):
+            if new_name and new_phone:
+                # class_id 찾기
+                class_map = {c["name"]: c["id"] for c in all_classes}
+                cid = class_map.get(new_class, 1)
+                add_student(cid, new_name, new_phone, new_sessions, new_parent_phone)
+                st.success(f"✅ {new_name} 학생 등록 완료!")
+                st.rerun()
+            else:
+                st.warning("이름과 연락처는 필수입니다.")
+    
+    # 탭 2: 학생 정보 수정
+    with tab_m2:
+        if all_students:
+            st.markdown("**학생 선택 후 수정**")
+            student_map = {f"{s['name']} ({s['class_name']})": s for s in all_students}
+            selected_student_key = st.selectbox("수정할 학생 선택", list(student_map.keys()), key="edit_student_select")
+            edit_s = student_map[selected_student_key]
+            
+            with st.form("edit_student_form"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    e_name = st.text_input("이름", value=edit_s["name"], key="e_name")
+                    e_phone = st.text_input("연락처", value=edit_s["phone"], key="e_phone")
+                    e_parent = st.text_input("학부모 연락처", value=edit_s.get("parent_phone", ""), key="e_parent")
+                with col2:
+                    class_map = {c["name"]: c["id"] for c in all_classes}
+                    e_class = st.selectbox("반", list(class_map.keys()),
+                                         index=list(class_map.keys()).index(edit_s["class_name"]) if edit_s["class_name"] in class_map else 0,
+                                         key="e_class")
+                    e_sessions = st.number_input("잔여 수업 횟수", min_value=0, max_value=100,
+                                                value=edit_s["remaining_sessions"], key="e_sessions")
+                
+                sub_col1, sub_col2 = st.columns(2)
+                with sub_col1:
+                    if st.form_submit_button("💾 수정 저장", use_container_width=True, type="primary"):
+                        cid = class_map[e_class]
+                        update_student(edit_s["id"], cid, e_name, e_phone, e_sessions, e_parent)
+                        st.success("✅ 수정 완료!")
+                        st.rerun()
+                with sub_col2:
+                    if st.form_submit_button("🗑️ 학생 삭제", use_container_width=True):
+                        delete_student(edit_s["id"])
+                        st.success(f"🗑️ {edit_s['name']} 학생 삭제 완료")
+                        st.rerun()
+        else:
+            st.info("등록된 학생이 없습니다.")
+    
+    # 탭 3: 반 관리
+    with tab_m3:
+        st.markdown("**기존 반 목록**")
+        for c in all_classes:
+            student_count = len(get_students_by_class(c["id"]))
+            st.caption(f"📚 {c['name']} ({c['day_of_week']} {c['time_slot']}) - {student_count}명")
+        
+        st.divider()
+        st.markdown("**새 반 등록**")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            new_cname = st.text_input("반 이름", placeholder="예: 고등 영어 심화", key="new_cname")
+        with col2:
+            new_day = st.text_input("요일", placeholder="월/수", key="new_day")
+        with col3:
+            new_time = st.text_input("시간", placeholder="17:00", key="new_time")
+        
+        if st.button("➕ 반 등록", use_container_width=True, key="btn_add_class"):
+            if new_cname and new_day and new_time:
+                add_class(new_cname, new_day, new_time)
+                st.success(f"✅ {new_cname} 반 등록 완료!")
+                st.rerun()
+            else:
+                st.warning("모든 항목을 입력해주세요.")
 
 
 # ─── 메뉴 2: 교재 분석 & 단어장 생성 ──────────────────────
@@ -881,27 +977,53 @@ elif menu == "📋 학생 히스토리 & 주간 발송":
                 solapi_secret = st.session_state.get("solapi_secret_input", os.getenv("SOLAPI_API_SECRET", ""))
                 solapi_from = st.session_state.get("solapi_from_input", os.getenv("SOLAPI_FROM_NUMBER", ""))
                 
+                # 잔액 확인
+                if solapi_key and solapi_key != "YOUR_SOLAPI_KEY":
+                    balance = check_solapi_balance(solapi_key, solapi_secret)
+                    if balance:
+                        st.caption(f"💰 솔라피 잔액: {balance.get('balance', '?')}원")
+                else:
+                    st.info("📌 솔라피 API 키를 ⚙️ 설정에 입력하면 실제 발송됩니다.\n지금은 **테스트 모드**로 메시지만 확인 가능합니다.")
+                
+                # 발신 대상 정보
+                st.caption(f"📞 발송 대상: {parent_phone} | 발신 번호: {solapi_from or '미설정'}")
+                
                 col_send1, col_send2 = st.columns(2)
                 
                 with col_send1:
-                    if st.button("💬 카카오 알림톡 발송", use_container_width=True, key="send_kakao"):
+                    if st.button("💬 카카오 알림톡 발송", use_container_width=True, key="send_kakao", type="primary"):
                         if not parent_phone:
                             st.error("발송할 학부모 연락처가 없습니다.")
                         else:
-                            result = send_solapi_message(solapi_key, solapi_secret, parent_phone, solapi_from, edited_report)
-                            if result["success"]:
+                            # 카카오 알림톡 발송 (template_code/pf_id 없으면 일반 문자로 폴백)
+                            result = send_kakao_alimtalk(
+                                solapi_key, solapi_secret,
+                                parent_phone, solapi_from,
+                                edited_report
+                            )
+                            if result.get("success"):
                                 st.success(result["message"])
+                            elif result.get("is_test"):
+                                st.info(result["message"])
                             else:
                                 st.warning(result["message"])
+                                if "fallback" in result:
+                                    fb = result["fallback"]
+                                    if fb.get("success"):
+                                        st.success(f"✅ 대체 문자 발송 성공: {fb['message']}")
+                                    else:
+                                        st.warning(f"대체 문자 결과: {fb.get('message', '')}")
                 
                 with col_send2:
                     if st.button("📱 SMS 문자 발송", use_container_width=True, key="send_sms"):
                         if not parent_phone:
                             st.error("발송할 학부모 연락처가 없습니다.")
                         else:
-                            result = send_solapi_message(solapi_key, solapi_secret, parent_phone, solapi_from, edited_report)
-                            if result["success"]:
+                            result = send_message(solapi_key, solapi_secret, parent_phone, solapi_from, edited_report)
+                            if result.get("success"):
                                 st.success(result["message"])
+                            elif result.get("is_test"):
+                                st.info(result["message"])
                             else:
                                 st.warning(result["message"])
 

@@ -281,3 +281,79 @@ def get_distinct_schools():
     rows = cursor.fetchall()
     conn.close()
     return [r["school_name"] for r in rows]
+
+
+# ---------- 학생 CRUD ----------
+
+def add_student(class_id, name, phone, remaining_sessions=8, parent_phone=""):
+    """새 학생 등록"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO students (class_id, name, phone, remaining_sessions, parent_phone)
+        VALUES (?, ?, ?, ?, ?)
+    """, (class_id, name, phone, remaining_sessions, parent_phone))
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return new_id
+
+
+def update_student(student_id, class_id, name, phone, remaining_sessions, parent_phone=""):
+    """학생 정보 수정"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE students
+        SET class_id=?, name=?, phone=?, remaining_sessions=?, parent_phone=?
+        WHERE id=?
+    """, (class_id, name, phone, remaining_sessions, parent_phone, student_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_student(student_id):
+    """학생 삭제 (관련 attendance, history도 함께 삭제)"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM attendance WHERE student_id=?", (student_id,))
+    cursor.execute("DELETE FROM student_history WHERE student_id=?", (student_id,))
+    cursor.execute("DELETE FROM students WHERE id=?", (student_id,))
+    conn.commit()
+    conn.close()
+
+
+def add_class(name, day_of_week, time_slot):
+    """새 반 등록"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO classes (name, day_of_week, time_slot) VALUES (?, ?, ?)",
+                   (name, day_of_week, time_slot))
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return new_id
+
+
+def update_class(class_id, name, day_of_week, time_slot):
+    """반 정보 수정"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE classes SET name=?, day_of_week=?, time_slot=? WHERE id=?",
+                   (name, day_of_week, time_slot, class_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_class(class_id):
+    """반 삭제 (소속 학생도 함께 삭제)"""
+    students = get_students_by_class(class_id)
+    conn = get_connection()
+    cursor = conn.cursor()
+    for s in students:
+        cursor.execute("DELETE FROM attendance WHERE student_id=?", (s["id"],))
+        cursor.execute("DELETE FROM student_history WHERE student_id=?", (s["id"],))
+    cursor.execute("DELETE FROM students WHERE class_id=?", (class_id,))
+    cursor.execute("DELETE FROM classes WHERE id=?", (class_id,))
+    conn.commit()
+    conn.close()
