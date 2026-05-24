@@ -25,7 +25,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ─── 스타일링 ────────────────────────────────────────────────
+# ─── 스타일링 & 기본 테마 설정 ──────────────────────────────────
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;700&display=swap');
@@ -34,6 +34,11 @@ st.markdown("""
         font-family: 'Noto Sans KR', sans-serif;
     }
     
+    /* 기본 배경색 화이트 강제 */
+    .stApp {
+        background-color: white !important;
+    }
+
     .main-header { font-size: 2.2rem; font-weight: 700; color: #D81B60; padding: 0.5rem 0; }
     .sub-header { font-size: 1.5rem; font-weight: 600; color: #AD1457; padding: 0.3rem 0; border-bottom: 2px solid #FCE4EC; margin-bottom: 1rem; }
     
@@ -42,13 +47,9 @@ st.markdown("""
         transition: all 0.3s;
         font-weight: 600;
     }
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(216, 27, 96, 0.2);
-    }
     
     [data-testid="stSidebar"] {
-        background-color: #FFF5F8;
+        background-color: #FFF5F8 !important;
         border-right: 1px solid #FCE4EC;
     }
     
@@ -59,12 +60,6 @@ st.markdown("""
         box-shadow: 0 2px 15px rgba(0,0,0,0.05);
         border: 1px solid #FCE4EC;
         margin-bottom: 1rem;
-    }
-
-    .report-box {
-        background-color: #F9FAFB; border: 2px solid #E5E7EB;
-        padding: 1.5rem; border-radius: 10px; margin: 1rem 0;
-        white-space: pre-wrap; line-height: 1.8;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -102,7 +97,8 @@ st.markdown(f"""
 # ─── 사이드바 네비게이션 ───────────────────────────────
 with st.sidebar:
     st.markdown("<div style='text-align:center; padding:1rem;'>", unsafe_allow_html=True)
-    st.image("https://img.icons8.com/bubbles/100/000000/woman-profile.png", width=80)
+    # 이미지 대신 이모지 아이콘 사용 (엑박 방지)
+    st.markdown("<span style='font-size:5rem;'>👩‍🏫</span>", unsafe_allow_html=True)
     st.markdown("<h3 style='color:#D81B60; margin:0;'>안녕하세요!</h3></div>", unsafe_allow_html=True)
     
     nav_menus = ["📊 대시보드", "📖 교재분석 & 단어장", "🔬 시험지 OCR 진단", "🏫 학교별 기출경향", "📋 히스토리 & 리포트"]
@@ -149,6 +145,7 @@ if st.session_state.menu == "📊 대시보드":
 
     all_s = get_all_students()
     all_c = get_all_classes()
+    all_sch = get_all_schools()
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("총 학생수", f"{len(all_s)}명")
     c2.metric("운영 반 수", f"{len(all_c)}개")
@@ -183,10 +180,10 @@ if st.session_state.menu == "📊 대시보드":
             r_name = st.text_input("이름")
             r_phone = st.text_input("연락처")
             r_class = st.selectbox("반 선택", [c["name"] for c in all_c], key="reg_c")
-            r_school = st.selectbox("학교 선택", [s["name"] for s in all_schools], key="reg_s")
+            r_school = st.selectbox("학교 선택", [s["name"] for s in all_sch], key="reg_s")
             if st.button("등록", use_container_width=True):
                 cid = next(c["id"] for c in all_c if c["name"] == r_class)
-                sid = next(s["id"] for s in all_schools if s["name"] == r_school)
+                sid = next(s["id"] for s in all_sch if s["name"] == r_school)
                 add_student(cid, r_name, r_phone, 8, "", sid); st.rerun()
         
         with st.expander("📋 반 등록", expanded=False):
@@ -238,7 +235,8 @@ elif st.session_state.menu == "🔬 시험지 OCR 진단":
     st.markdown("<div class='main-header'>🔬 시험지 OCR 분석</div>", unsafe_allow_html=True)
     
     c1, c2 = st.columns(2)
-    student_map = {f"{s['name']} ({s['school_name']})": s for s in get_all_students()}
+    all_s = get_all_students()
+    student_map = {f"{s['name']} ({s['school_name']})": s for s in all_s}
     sel_s = c1.selectbox("학생 선택", list(student_map.keys()))
     week = c2.selectbox("주차 선택", [f"{i}주차" for i in range(1, 21)])
     
@@ -255,14 +253,12 @@ elif st.session_state.menu == "🔬 시험지 OCR 진단":
             f_info = [{"type": "pdf" if f.name.endswith(".pdf") else "image", "bytes": f.getvalue()} for f in files]
             with st.spinner("AI가 채점 중입니다..."):
                 st.session_state.last_exam_result = analyze_exam_multi(api_key, f_info, week)
-                # 초기 OX 피드백 생성
-                st.session_state.ocr_feedback = [{"q": f"문항 {i+1}", "ox": True} for i in range(st.session_state.last_exam_result.get('total_questions', 0))]
+                st.session_state.ocr_feedback = [True] * st.session_state.last_exam_result.get('total_questions', 0)
 
     if st.session_state.last_exam_result:
         res = st.session_state.last_exam_result
         st.markdown("<div class='sub-header'>✅ 정답 여부 수정 (O/X 선택 가능)</div>", unsafe_allow_html=True)
         
-        # OX 수정 인터페이스
         new_feedback = []
         cols = st.columns(5)
         for i in range(res['total_questions']):
@@ -270,7 +266,6 @@ elif st.session_state.menu == "🔬 시험지 OCR 진단":
                 val = st.toggle(f"Q{i+1}", value=True, key=f"ox_{i}")
                 new_feedback.append(val)
         
-        # 수정된 데이터로 리포트 갱신
         correct = sum(new_feedback)
         res['correct_count'] = correct
         res['incorrect_count'] = res['total_questions'] - correct
@@ -306,7 +301,6 @@ elif st.session_state.menu == "🏫 학교별 기출경향":
             st.markdown("</div>", unsafe_allow_html=True)
         with c2:
             st.markdown("<div class='info-card'><h4>영역별 비중 변화</h4>", unsafe_allow_html=True)
-            # 여기에는 연도별 차트 등을 시각화 가능
             st.caption("누적된 데이터를 기반으로 트렌드가 표시됩니다.")
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -315,7 +309,7 @@ elif st.session_state.menu == "📋 히스토리 & 리포트":
     st.markdown("<div class='main-header'>📋 학생 히스토리 & 주간 리포트</div>", unsafe_allow_html=True)
     all_s = get_all_students()
     if all_s:
-        student_names = {f"{s['name']} ({s['school_name']})": s for s in all_s}
+        student_names = {f"{s['name']} ({s['school_name'] or '미지정'})": s for s in all_s}
         sel_name = st.selectbox("학생 선택", list(student_names.keys()))
         s_obj = student_names[sel_name]
         
