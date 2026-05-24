@@ -15,34 +15,41 @@ def get_connection():
     return conn
 
 def init_database():
-    """데이터베이스 초기화 및 테이블 생성, 샘플 데이터 적재"""
+    """데이터베이스 초기화 및 테이블 생성, 마이그레이션"""
     conn = get_connection()
     cursor = conn.cursor()
     
-    # 1. schools 테이블 및 school_id 컬럼 추가를 위한 마이그레이션 로직 포함
-    cursor.executescript("""
-        CREATE TABLE IF NOT EXISTS schools (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE
-        );
+    # 1. schools 테이블 생성
+    cursor.execute("CREATE TABLE IF NOT EXISTS schools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE)")
 
-        CREATE TABLE IF NOT EXISTS classes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            day_of_week TEXT NOT NULL,
-            time_slot TEXT NOT NULL,
-            notes TEXT DEFAULT ''
-        );
-    """)
+    # 2. classes 테이블 마이그레이션 (notes 컬럼 추가)
+    cursor.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='classes'")
+    if cursor.fetchone()[0] > 0:
+        cursor.execute("PRAGMA table_info(classes)")
+        cols = [c[1] for c in cursor.fetchall()]
+        if 'notes' not in cols:
+            cursor.execute("ALTER TABLE classes ADD COLUMN notes TEXT DEFAULT ''")
+    else:
+        cursor.execute("""
+            CREATE TABLE classes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                day_of_week TEXT NOT NULL,
+                time_slot TEXT NOT NULL,
+                notes TEXT DEFAULT ''
+            )
+        """)
 
-    # 2. students 테이블 생성 (school_id 포함)
-    # 이미 테이블이 있다면 컬럼 추가 시도
-    try:
-        cursor.execute("SELECT school_id FROM students LIMIT 1")
-    except sqlite3.OperationalError:
-        # 테이블이 없거나 컬럼이 없는 경우
-        cursor.executescript("""
-            CREATE TABLE IF NOT EXISTS students_new (
+    # 3. students 테이블 마이그레이션 (school_id 추가)
+    cursor.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='students'")
+    if cursor.fetchone()[0] > 0:
+        cursor.execute("PRAGMA table_info(students)")
+        cols = [c[1] for c in cursor.fetchall()]
+        if 'school_id' not in cols:
+            cursor.execute("ALTER TABLE students ADD COLUMN school_id INTEGER")
+    else:
+        cursor.execute("""
+            CREATE TABLE students (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 class_id INTEGER NOT NULL,
                 name TEXT NOT NULL,
@@ -52,26 +59,20 @@ def init_database():
                 school_id INTEGER,
                 FOREIGN KEY (class_id) REFERENCES classes(id),
                 FOREIGN KEY (school_id) REFERENCES schools(id)
-            );
+            )
         """)
-        # 기존 데이터가 있다면 복사 (복잡성 방지를 위해 단순 생성 선호)
-        # 만약 students 테이블이 이미 있다면:
-        cursor.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='students'")
-        if cursor.fetchone()[0] > 0:
-            # 기존 컬럼만 복사
-            cursor.execute("INSERT INTO students_new (id, class_id, name, phone, remaining_sessions, parent_phone) SELECT id, class_id, name, phone, remaining_sessions, parent_phone FROM students")
-            cursor.execute("DROP TABLE students")
-        cursor.execute("ALTER TABLE students_new RENAME TO students")
 
-    cursor.executescript("""
+    # 4. 나머지 테이블
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS attendance (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             student_id INTEGER NOT NULL,
             date TEXT NOT NULL,
             status TEXT NOT NULL CHECK(status IN ('출석','결석','보강')),
             FOREIGN KEY (student_id) REFERENCES students(id)
-        );
-        
+        )
+    """)
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS student_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             student_id INTEGER NOT NULL,
@@ -80,8 +81,9 @@ def init_database():
             notes TEXT DEFAULT '',
             week_label TEXT DEFAULT '',
             FOREIGN KEY (student_id) REFERENCES students(id)
-        );
-        
+        )
+    """)
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS school_exams (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             school_name TEXT NOT NULL,
@@ -90,30 +92,14 @@ def init_database():
             semester TEXT NOT NULL,
             analysis_json TEXT DEFAULT '',
             ai_report TEXT DEFAULT ''
-        );
+        )
     """)
     
-    # 기초 학교 데이터
+    # 기초 데이터 삽입
     schools_list = ["대치중학교", "대청중학교", "단대부중", "숙명여중", "역삼중학교"]
     for sname in schools_list:
         cursor.execute("INSERT OR IGNORE INTO schools (name) VALUES (?)", (sname,))
 
-    # 샘플 클래스
-    cursor.execute("SELECT count(*) FROM classes")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT INTO classes (name, day_of_week, time_slot, notes) VALUES (?, ?, ?, ?)",
-                       ("초등 기초 파닉스", "월/수", "15:00", "7세~초2 대상"))
-        cursor.execute("INSERT INTO classes (name, day_of_week, time_slot, notes) VALUES (?, ?, ?, ?)",
-                       ("중등 내신 대비 B", "화/목", "18:30", "중2 집중반"))
-    
-    # 샘플 학생
-    cursor.execute("SELECT count(*) FROM students")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT INTO students (class_id, name, phone, remaining_sessions, parent_phone, school_id) VALUES (?, ?, ?, ?, ?, ?)",
-                       (1, "김민준", "010-1111-1111", 8, "010-1111-0000", 1))
-        cursor.execute("INSERT INTO students (class_id, name, phone, remaining_sessions, parent_phone, school_id) VALUES (?, ?, ?, ?, ?, ?)",
-                       (1, "이서연", "010-2222-2222", 1, "010-2222-0000", 4))
-    
     conn.commit()
     conn.close()
 
@@ -133,10 +119,8 @@ def add_school(name):
         cursor.execute("INSERT INTO schools (name) VALUES (?)", (name,))
         conn.commit()
         return True
-    except:
-        return False
-    finally:
-        conn.close()
+    except: return False
+    finally: conn.close()
 
 def delete_school(school_id):
     conn = get_connection()
@@ -205,6 +189,14 @@ def mark_attendance(student_id, status):
     if status == "출석":
         cursor.execute("UPDATE students SET remaining_sessions = MAX(0, remaining_sessions - 1) WHERE id = ?",
                        (student_id,))
+    conn.commit()
+    conn.close()
+
+def recharge_sessions(student_id, count=8):
+    """수업 횟수 충전"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE students SET remaining_sessions = remaining_sessions + ? WHERE id = ?", (count, student_id))
     conn.commit()
     conn.close()
 
@@ -296,7 +288,7 @@ def get_distinct_schools_from_exams():
     conn.close()
     return [r["school_name"] for r in rows]
 
-# ---------- 학생 CRUD ----------
+# ---------- CRUD ----------
 
 def add_student(class_id, name, phone, remaining_sessions=8, parent_phone="", school_id=None):
     conn = get_connection()
@@ -306,9 +298,7 @@ def add_student(class_id, name, phone, remaining_sessions=8, parent_phone="", sc
         VALUES (?, ?, ?, ?, ?, ?)
     """, (class_id, name, phone, remaining_sessions, parent_phone, school_id))
     conn.commit()
-    new_id = cursor.lastrowid
     conn.close()
-    return new_id
 
 def update_student(student_id, class_id, name, phone, remaining_sessions, parent_phone="", school_id=None):
     conn = get_connection()
