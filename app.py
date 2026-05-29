@@ -354,25 +354,35 @@ elif st.session_state.menu == "📖 교재분석":
     file = st.file_uploader("교재 업로드 (PDF/이미지)", type=["pdf", "png", "jpg", "jpeg"])
     if file:
         if st.button("🤖 AI 50개 핵심 단어 추출", type="primary", use_container_width=True):
-            with st.spinner("AI가 교재를 분석 중입니다..."):
+            vocab_log = st.empty()
+            with st.spinner("AI 교재 분석 중..."):
                 api_key = st.session_state.gemini_key_input
                 if not api_key:
                     st.error("설정에서 Gemini API Key를 입력해주세요.")
                 else:
                     try:
+                        vocab_log.info("⏳ 1/3 📄 교재 파일 텍스트 추출 중...")
                         if file.name.lower().endswith('.pdf'):
                             text, success = process_pdf_with_ocr(api_key, file.getvalue())
                         else:
                             text, success = extract_text_from_image(api_key, file.getvalue())
+                        
                         if success:
+                            vocab_log.info("⏳ 2/3 🤖 AI가 핵심 단어 50개 추출 중...")
                             st.session_state.vocab_result = extract_vocabulary(api_key, text)
+                            
                             if st.session_state.vocab_result:
+                                vocab_log.info("⏳ 3/3 📊 단어장 데이터 정리 중...")
+                                vocab_log.success(f"✅ {len(st.session_state.vocab_result)}개 단어 추출 완료!")
                                 st.toast("분석 완료!")
                             else:
+                                vocab_log.warning("⚠️ 단어 추출 실패 - 파일 내용이 비어있거나 텍스트 인식이 어렵습니다.")
                                 st.warning("단어를 추출하지 못했습니다.")
                         else:
+                            vocab_log.error(f"❌ 텍스트 추출 실패: {text}")
                             st.error(f"텍스트 추출 실패: {text}")
                     except Exception as e:
+                        vocab_log.error(f"❌ 분석 중 오류: {e}")
                         st.error(f"분석 중 오류: {e}")
                 st.rerun()
 
