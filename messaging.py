@@ -183,3 +183,69 @@ def send_kakao_alimtalk(api_key, api_secret, to_number, from_number, text, templ
         return send_message(api_key, api_secret, to_number, from_number, text)
     
     return send_message(api_key, api_secret, to_number, from_number, text, kakao_options)
+
+
+# ============================================================
+# 🆕 종합 알림톡 발송 함수 (템플릿 변수 지원)
+# ============================================================
+def send_comprehensive_alimtalk(api_key, api_secret, from_number, to_number, pf_id, template_id, variables):
+    """
+    솔라피 카카오 알림톡 발송 (템플릿 변수 포함)
+    
+    Parameters:
+        api_key (str): 솔라피 API Key
+        api_secret (str): 솔라피 API Secret
+        from_number (str): 발신번호
+        to_number (str): 수신번호 (학부모)
+        pf_id (str): 카카오 채널 ID (예: "@앨리영어")
+        template_id (str): 승인된 알림톡 템플릿 ID
+        variables (dict): 템플릿 변수 (예: {"#{학생이름}": "김앨리", ...})
+    
+    Returns:
+        dict: 발송 결과
+    """
+    kakao_options = {
+        "pfId": pf_id,
+        "templateId": template_id,
+        "variables": variables
+    }
+    
+    # 폴백 문자 메시지 (알림톡 실패 시)
+    fallback_text = f"[앨리영어] {variables.get('#{학생이름}', '학생')}님의 알림이 있습니다. 자세한 내용은 앱을 확인해주세요."
+    
+    return send_message(api_key, api_secret, to_number, from_number, fallback_text, kakao_options)
+
+
+# ============================================================
+# 🆕 사용 예시 (app.py 등에서 호출)
+# ============================================================
+"""
+# app.py에서 이렇게 사용:
+
+from messaging import send_comprehensive_alimtalk
+
+# 알림톡 발송
+result = send_comprehensive_alimtalk(
+    api_key=st.session_state.solapi_key_input,
+    api_secret=st.session_state.solapi_secret_input,
+    from_number=st.session_state.solapi_from_input,
+    to_number=student_info['parent_phone'],
+    pf_id="@앨리영어",
+    template_id="YOUR_APPROVED_TEMPLATE_ID",
+    variables={
+        "#{학생이름}": "김앨리",
+        "#{출석날짜}": "5월 29일",
+        "#{출석상태}": "✅ 출석",
+        "#{잔여횟수}": "7",
+        "#{시험주차}": "3주차 테스트",
+        "#{정답률}": "18/25 (72%)",
+        "#{취약영역}": "⚠️ 문법 영역",
+        "#{리포트월}": "5월",
+        "#{듣기점수}": "85",
+        "#{어휘점수}": "78",
+        "#{문법점수}": "65",
+        "#{독해점수}": "80",
+        "#{AI총평}": "이번 달 듣기 영역에서...",
+    }
+)
+"""
