@@ -15,7 +15,7 @@ try:
 except ImportError:
     GENAI_AVAILABLE = False
 
-def get_model(api_key, model_name="gemini-2.5-flash"):
+def get_model(api_key, model_name="gemini-1.5-flash"):
     if not api_key or api_key == "": return None
     if not GENAI_AVAILABLE: return None
     genai.configure(api_key=api_key)
@@ -60,16 +60,30 @@ def process_pdf_with_ocr(api_key, pdf_bytes):
 
 def extract_vocabulary(api_key, text):
     model = get_model(api_key)
-    if not model: return []
-    prompt = f"다음 텍스트에서 핵심 영단어 50개를 추출하여 [word, meaning, synonyms, derivatives] 필드를 가진 JSON 배열로 반환해줘. 다른 텍스트 없이 JSON만 출력해:\n\n{text[:10000]}"
+    if not model: return {"error": "API 키가 설정되지 않았습니다."}
+    
+    prompt = f"""다음 텍스트에서 핵심 영단어 30개를 추출하여 JSON 배열로만 반환해줘.
+각 항목은 "word"(영단어), "meaning"(뜻), "derivatives"(파생어) 필드를 가져.
+다른 설명이나 텍스트 없이 순수 JSON 배열만 출력해.
+배열이 없으면 빈 배열 []을 반환해.
+
+텍스트:
+{text[:10000]}"""
     try:
         response = model.generate_content(prompt)
-        text = response.text
-        if "```json" in text: text = text.split("```json")[1].split("```")[0]
-        match = re.search(r'\[.*\]', text, re.DOTALL)
-        if match: return json.loads(match.group())
-    except: pass
-    return []
+        res_text = response.text
+        # JSON 블록 추출
+        if "```json" in res_text:
+            res_text = res_text.split("```json")[1].split("```")[0]
+        elif "```" in res_text:
+            res_text = res_text.split("```")[1].split("```")[0]
+        match = re.search(r'\[.*\]', res_text, re.DOTALL)
+        if match:
+            result = json.loads(match.group())
+            return result if isinstance(result, list) else []
+        return []
+    except Exception as e:
+        return {"error": f"단어 추출 중 오류: {str(e)}"}
 
 def analyze_exam_multi(api_key, files_info, week):
     model = get_model(api_key)

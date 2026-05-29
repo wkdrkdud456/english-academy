@@ -368,15 +368,19 @@ elif st.session_state.menu == "📖 교재분석":
                             text, success = extract_text_from_image(api_key, file.getvalue())
                         
                         if success:
-                            vocab_log.info("⏳ 2/3 🤖 AI가 핵심 단어 50개 추출 중...")
-                            st.session_state.vocab_result = extract_vocabulary(api_key, text)
+                            vocab_log.info("⏳ 2/3 🤖 AI가 핵심 단어 추출 중...")
+                            result = extract_vocabulary(api_key, text)
                             
-                            if st.session_state.vocab_result:
-                                vocab_log.info("⏳ 3/3 📊 단어장 데이터 정리 중...")
-                                vocab_log.success(f"✅ {len(st.session_state.vocab_result)}개 단어 추출 완료!")
+                            if isinstance(result, dict) and "error" in result:
+                                vocab_log.error(f"❌ 단어 추출 실패: {result['error']}")
+                                st.error(f"⚠️ {result['error']}")
+                            elif result:
+                                st.session_state.vocab_result = result
+                                vocab_log.info(f"⏳ 3/3 📊 {len(result)}개 단어 정리 중...")
+                                vocab_log.success(f"✅ {len(result)}개 단어 추출 완료!")
                                 st.toast("분석 완료!")
                             else:
-                                vocab_log.warning("⚠️ 단어 추출 실패 - 파일 내용이 비어있거나 텍스트 인식이 어렵습니다.")
+                                vocab_log.warning("⚠️ 단어를 추출하지 못했습니다. 텍스트 내용을 확인해주세요.")
                                 st.warning("단어를 추출하지 못했습니다.")
                         else:
                             vocab_log.error(f"❌ 텍스트 추출 실패: {text}")
