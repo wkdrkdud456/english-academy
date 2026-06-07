@@ -1078,20 +1078,27 @@ elif st.session_state.menu == "📨 알림톡 발송":
                     msg = "\n".join(msg_parts)
                     
                     if template_id:
-                        att_str = " | ".join([f"{a['date']} ({a['day_name']}): {a['status']}" for a in week_att]) if week_att else ""
-                        test_str = ""
+                        att1_date = week_att[0]['date'] if len(week_att) > 0 else ""
+                        att1_status = week_att[0]['status'] if len(week_att) > 0 else ""
+                        att2_date = week_att[1]['date'] if len(week_att) > 1 else ""
+                        att2_status = week_att[1]['status'] if len(week_att) > 1 else ""
+                        test_lines = []
                         if c_obj:
-                            test_lines = []
                             for area in get_class_areas(c_obj['id']):
                                 sv = st.session_state.get(f"area_score_{area['id']}", "")
                                 if sv:
                                     test_lines.append(f"{area['area_name']}: {sv}")
-                            test_str = " | ".join(test_lines)
+                        test_str = ", ".join(test_lines) if test_lines else "-"
                         variables = {
-                            "#{학생이름}": s['name'], "#{출석날짜}": att_str, "#{출석상태}": "",
-                            "#{잔여횟수}": "", "#{시험주차}": "", "#{정답률}": test_str,
-                            "#{취약영역}": "", "#{리포트월}": "", "#{듣기점수}": "", "#{어휘점수}": "",
-                            "#{문법점수}": "", "#{독해점수}": "", "#{AI총평}": "",
+                            "#{학생이름}": s['name'],
+                            "#{출석날짜}": att1_date, "#{출석상태}": att1_status,
+                            "#{출석날짜2}": att2_date, "#{출석상태2}": att2_status,
+                            "#{시험주차}": week, "#{정답률}": test_str,
+                            "#{취약영역}": "-",
+                            "#{리포트월}": datetime.now().strftime("%Y년 %m월"),
+                            "#{듣기점수}": "0", "#{어휘점수}": "0",
+                            "#{문법점수}": "0", "#{독해점수}": "0",
+                            "#{AI총평}": "",
                         }
                         res = send_comprehensive_alimtalk(api_key, api_secret, from_number, parent_phone, pf_id, template_id, variables)
                     else:
@@ -1161,13 +1168,19 @@ elif st.session_state.menu == "📨 알림톡 발송":
                         msg_parts += ["", "❤️ 대치앨리영어"]
                         msg = "\n".join(msg_parts)
                         if batch_template_id:
-                            att_str = " | ".join([f"{a['date']} ({a['day_name']}): {a['status']}" for a in week_att_b]) if week_att_b else ""
-                            test_str = " | ".join([f"{a['area_name']}: -" for a in class_areas_batch]) if class_areas_batch else ""
+                        att1_d = week_att_b[0]['date'] if len(week_att_b) > 0 else ""
+                            att1_s = week_att_b[0]['status'] if len(week_att_b) > 0 else ""
+                            att2_d = week_att_b[1]['date'] if len(week_att_b) > 1 else ""
+                            att2_s = week_att_b[1]['status'] if len(week_att_b) > 1 else ""
+                            test_str = ", ".join([f"{a['area_name']}: -" for a in class_areas_batch]) if class_areas_batch else "-"
                             variables = {
-                                "#{학생이름}": stu['name'], "#{출석날짜}": att_str, "#{출석상태}": "",
-                                "#{잔여횟수}": "", "#{시험주차}": "", "#{정답률}": test_str,
-                                "#{취약영역}": "", "#{리포트월}": "", "#{듣기점수}": "", "#{어휘점수}": "",
-                                "#{문법점수}": "", "#{독해점수}": "", "#{AI총평}": "",
+                                "#{학생이름}": stu['name'],
+                                "#{출석날짜}": att1_d, "#{출석상태}": att1_s,
+                                "#{출석날짜2}": att2_d, "#{출석상태2}": att2_s,
+                                "#{시험주차}": "", "#{정답률}": test_str,
+                                "#{취약영역}": "-",
+                                "#{리포트월}": "", "#{듣기점수}": "0", "#{어휘점수}": "0",
+                                "#{문법점수}": "0", "#{독해점수}": "0", "#{AI총평}": "",
                             }
                             res = send_comprehensive_alimtalk(api_key, api_secret, from_number, stu['parent_phone'], batch_pf_id, batch_template_id, variables)
                         else:
@@ -1193,16 +1206,28 @@ elif st.session_state.menu == "📨 알림톡 발송":
                     </div>
                 </div>
                 <div style="border-top: 1px solid #eee; padding-top: 12px;">
-                    <p>안녕하세요, <b>#{학생이름}</b>학부모님.</p>
+                    <p>안녕하세요, <b>#{학생이름}</b> 부모님.</p>
                     <p>자신감을 키우는 대치앨리영어교육입니다.</p>
+                    <p><b>#{학생이름}</b> 학생의 주간 학습 및 출석 현황을 보내드립니다.</p>
                     <br>
-                    <p>📅 <b>이번 주 출석 현황</b></p>
-                    <p>#{출석날짜}</p>
+                    <p>📅 #{출석날짜} 출석: #{출석상태}</p>
+                    <p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; #{출석날짜2} 출석: #{출석상태2}</p>
                     <br>
-                    <p>📝 <b>시험결과</b></p>
-                    <p>#{정답률}</p>
+                    <p>📊 시험 결과 [#{시험주차}]</p>
+                    <p>&nbsp;• 영역별 점수: #{정답률}</p>
+                    <p>&nbsp;• 취약 영역: #{취약영역}</p>
                     <br>
-                    <p style="text-align: right; font-size: 0.8rem; color: #888;">❤️ 대치앨리영어</p>
+                    <p>📈 #{리포트월} 월간 성적</p>
+                    <p>&nbsp;• 듣기: #{듣기점수}점 | 어휘: #{어휘점수}점</p>
+                    <p>&nbsp;• 문법: #{문법점수}점 | 독해: #{독해점수}점</p>
+                    <br>
+                    <p>📝 원장님 총평:</p>
+                    <p>"#{AI총평}"</p>
+                    <br>
+                    <p>늘 믿고 맡겨주셔서 감사합니다.</p>
+                    <p>우리 아이가 즐겁고 올바르게 영어를 배울 수 있도록</p>
+                    <p>앞으로도 최선을 다하겠습니다. ❤</p>
+                    <p style="text-align: right; font-size: 0.8rem; color: #888; margin-top: 12px;">[대치앨리영어]</p>
                 </div>
             </div>
         </div>
