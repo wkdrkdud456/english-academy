@@ -358,27 +358,30 @@ elif st.session_state.menu == "⚙️ 학원 관리":
         st.markdown("#### 📝 반별 영역 관리 (시험 영역)")
         if all_c:
             sel_class_for_area = st.selectbox("영역 관리할 반 선택", [c['name'] for c in all_c], key="area_class_select")
-            c_obj_area = next(c for c in all_c if c['name'] == sel_class_for_area)
+            c_obj_area = next((c for c in all_c if c['name'] == sel_class_for_area), None)
             
-            with st.form("add_area_form"):
-                new_area_name = st.text_input("새 영역 이름", placeholder="예: 어휘, 문법, 독해, 듣기")
-                if st.form_submit_button("➕ 영역 추가"):
-                    if new_area_name.strip():
-                        add_class_area(c_obj_area['id'], new_area_name.strip())
-                        st.toast(f"영역 '{new_area_name.strip()}' 추가 완료!")
-                        st.rerun()
-            
-            existing_areas = get_class_areas(c_obj_area['id'])
-            if existing_areas:
-                for area in existing_areas:
-                    c1, c2 = st.columns([5, 1])
-                    c1.write(f"  📌 {area['area_name']}")
-                    if c2.button("🗑️", key=f"del_area_{area['id']}"):
-                        delete_class_area(area['id'])
-                        st.toast(f"영역 '{area['area_name']}' 삭제 완료!")
-                        st.rerun()
+            if c_obj_area:
+                with st.form("add_area_form"):
+                    new_area_name = st.text_input("새 영역 이름", placeholder="예: 어휘, 문법, 독해, 듣기")
+                    if st.form_submit_button("➕ 영역 추가"):
+                        if new_area_name.strip():
+                            add_class_area(c_obj_area['id'], new_area_name.strip())
+                            st.toast(f"영역 '{new_area_name.strip()}' 추가 완료!")
+                            st.rerun()
+                
+                existing_areas = get_class_areas(c_obj_area['id'])
+                if existing_areas:
+                    for area in existing_areas:
+                        c1, c2 = st.columns([5, 1])
+                        c1.write(f"  📌 {area['area_name']}")
+                        if c2.button("🗑️", key=f"del_area_{area['id']}"):
+                            delete_class_area(area['id'])
+                            st.toast(f"영역 '{area['area_name']}' 삭제 완료!")
+                            st.rerun()
+                else:
+                    st.info("영역이 없습니다. 위에서 추가해주세요.")
             else:
-                st.info("영역이 없습니다. 위에서 추가해주세요.")
+                st.info("선택한 반을 찾을 수 없습니다.")
         else:
             st.info("반을 먼저 등록해주세요.")
 
