@@ -13,10 +13,15 @@ from datetime import datetime, timedelta
 from PIL import Image
 from docx import Document
 import altair as alt
+from dotenv import load_dotenv
+
+# .env 파일 로드
+load_dotenv()
 
 # 내부 모듈
 from db_manager import *
 from ai_service import *
+from ai_service import _model_cache
 from messaging import send_solapi_message, send_message, send_kakao_alimtalk, check_solapi_balance, send_comprehensive_alimtalk
 
 # ─── 페이지 설정 ─────────────────────────────────────────────
@@ -107,10 +112,24 @@ with st.sidebar:
 
     st.divider()
     with st.expander("⚙️ 시스템 설정"):
-        st.text_input("Gemini API Key", value=os.getenv("GEMINI_API_KEY", ""), type="password", key="gemini_key_input")
+        env_key = os.getenv("GEMINI_API_KEY", "")
+        st.text_input("Gemini API Key", value=env_key, type="password", key="gemini_key_input")
         st.text_input("Solapi Key", value=os.getenv("SOLAPI_API_KEY", ""), key="solapi_key_input")
         st.text_input("Solapi Secret", value=os.getenv("SOLAPI_API_SECRET", ""), type="password", key="solapi_secret_input")
         st.text_input("발신 번호", value=os.getenv("SOLAPI_FROM_NUMBER", ""), key="solapi_from_input")
+        # API 키 상태 표시
+        current_key = st.session_state.get("gemini_key_input", "")
+        if current_key:
+            st.success(f"✅ Gemini API 키 설정됨 (길이: {len(current_key)}자)")
+            # 현재 사용 중인 모델 표시
+            cached_model = _model_cache.get(current_key, "자동 선택")
+            st.info(f"🤖 현재 모델: {cached_model}")
+        else:
+            st.error("❌ Gemini API 키가 설정되지 않았습니다.")
+        if st.button("🔄 모델 캐시 초기화", use_container_width=True):
+            _model_cache.clear()
+            st.toast("모델 캐시가 초기화되었습니다!")
+            st.rerun()
         if st.button("🔄 DB 초기화"):
             if os.path.exists("academy.db"): os.remove("academy.db")
             init_database()
@@ -353,7 +372,7 @@ elif st.session_state.menu == "📖 교재분석":
     st.markdown("<div class='main-header'>📖 교재 분석 & 단어장 생성</div>", unsafe_allow_html=True)
     file = st.file_uploader("교재 업로드 (PDF/이미지)", type=["pdf", "png", "jpg", "jpeg"])
     if file:
-        if st.button("🤖 AI 50개 핵심 단어 추출", type="primary", use_container_width=True):
+        if st.button("🤖 AI 100개 핵심 단어 추출", type="primary", use_container_width=True):
             vocab_log = st.empty()
             with st.spinner("AI 교재 분석 중..."):
                 api_key = st.session_state.gemini_key_input
@@ -395,26 +414,61 @@ elif st.session_state.menu == "📖 교재분석":
         st.markdown("<div class='sub-header'>📋 단어장 미리보기</div>", unsafe_allow_html=True)
         selected = []
         for i, row in df.iterrows():
-            c1, c2 = st.columns([1, 9])
+            c1, c2, c3 = st.columns([0.5, 2, 8])
             if c1.checkbox(f"{i+1}", key=f"v_{i}", value=True): selected.append(i)
-            c2.markdown(f"**{row['word']}** : {row['meaning']}")
+            c2.markdown(f"**{row['word']}**")
+            derivs = row.get('derivatives', '')
+            synos = row.get('synonyms', '')
+            info_parts = [row['meaning']]
+            if isinstance(derivs, list) and derivs:
+                info_parts.append(f"<span style='color:#888; font-size:0.85rem;'>파생어: {', '.join(str(d) for d in derivs if d)}</span>")
+            elif isinstance(derivs, str) and derivs:
+                info_parts.append(f"<span style='color:#888; font-size:0.85rem;'>파생어: {derivs}</span>")
+            if isinstance(synos, list) and synos:
+                info_parts.append(f"<span style='color:#AD1457; font-size:0.85rem;'>유의어: {', '.join(str(s) for s in synos if s)}</span>")
+            elif isinstance(synos, str) and synos:
+                info_parts.append(f"<span style='color:#AD1457; font-size:0.85rem;'>유의어: {synos}</span>")
+            c3.markdown("<br>".join(info_parts), unsafe_allow_html=True)
         
         if st.button("📥 파일 생성 및 다운로드"):
             with st.spinner("파일 생성 중..."):
-                sel_df = df.iloc[selected]
+                # 파생어/유의어를 문자열로 변환하는 헬퍼
+                def to_str(val):
+                    if isinstance(val, list):
+                        return ", ".join(str(v) for v in val if v)
+                    return str(val) if val else ""
+                
+                # 엑셀용 데이터프레임 (파생어, 유의어 별도 컬럼)
+                excel_data = []
+                for _, r in df.iloc[selected].iterrows():
+                    excel_data.append({
+                        "단어": r['word'],
+                        "뜻": r['meaning'],
+                        "파생어": to_str(r.get('derivatives', '')),
+                        "유의어": to_str(r.get('synonyms', ''))
+                    })
+                excel_df = pd.DataFrame(excel_data)
                 output_ex = io.BytesIO()
-                with pd.ExcelWriter(output_ex, engine='openpyxl') as writer: sel_df.to_excel(writer, index=False)
+                with pd.ExcelWriter(output_ex, engine='openpyxl') as writer: 
+                    excel_df.to_excel(writer, index=False)
+                
+                # 워드용 (파생어, 유의어 별도 컬럼)
                 doc = Document()
                 doc.add_heading('🎀 대치앨리영어 단어장', 0)
-                table = doc.add_table(rows=1, cols=3); table.style = 'Table Grid'
-                for h in ['단어', '뜻', '파생어']: table.rows[0].cells[['단어', '뜻', '파생어'].index(h)].text = h
-                for _, r in sel_df.iterrows():
+                table = doc.add_table(rows=1, cols=4)
+                table.style = 'Table Grid'
+                for h_idx, h_name in enumerate(['단어', '뜻', '파생어', '유의어']):
+                    table.rows[0].cells[h_idx].text = h_name
+                for _, r in df.iloc[selected].iterrows():
                     cells = table.add_row().cells
-                    cells[0].text, cells[1].text, cells[2].text = str(r['word']), str(r['meaning']), str(r['derivatives'])
+                    cells[0].text = str(r['word'])
+                    cells[1].text = str(r['meaning'])
+                    cells[2].text = to_str(r.get('derivatives', ''))
+                    cells[3].text = to_str(r.get('synonyms', ''))
                 output_wd = io.BytesIO(); doc.save(output_wd)
             st.success("생성 완료!")
-            st.download_button("Excel 다운로드", output_ex.getvalue(), "앨리단어장.xlsx")
-            st.download_button("Word 다운로드", output_wd.getvalue(), "앨리단어장.docx")
+            st.download_button("📥 Excel 다운로드", output_ex.getvalue(), "앨리단어장.xlsx")
+            st.download_button("📥 Word 다운로드", output_wd.getvalue(), "앨리단어장.docx")
 
 # ====================================================================
 # 🔬 메뉴 5: 시험지 OCR
@@ -467,84 +521,182 @@ elif st.session_state.menu == "🔬 시험지 OCR":
                 st.session_state.last_exam_result = None
             else:
                 total_q = res.get('total_questions', 0)
+                area_acc = res.get('area_accuracy_percent', {})
+                area_qs = res.get('area_questions', {})
+                weakness = res.get('weakness_analysis', '')
+                prescription = res.get('prescription', '')
                 
-                # 정답 수정 UI - 예쁘게
-                st.markdown("""
-                <div class='sub-header' style='display:flex; align-items:center; gap:10px;'>
-                    <span style='font-size:1.8rem;'>✅</span>
-                    <span>정답 확인 및 수정</span>
-                    <span style='font-size:0.8rem; color:#888; font-weight:400;'>각 문제를 클릭하여 정답/오답을 토글하세요</span>
-                </div>
-                """, unsafe_allow_html=True)
+                # ── 상단 요약 카드 ──
+                st.markdown("<div class='sub-header'>📊 AI 채점 결과</div>", unsafe_allow_html=True)
                 
-                new_feedback = []
-                if total_q > 0:
-                    # 영역별로 그룹화
-                    areas = list(res.get('area_accuracy_percent', {}).keys()) or ["전체"]
-                    
-                    for area_idx, area in enumerate(areas):
-                        area_qs = total_q // len(areas) if len(areas) > 1 else total_q
-                        if area_idx == len(areas) - 1:
-                            area_qs = total_q - (area_qs * (len(areas) - 1))
-                        
-                        if len(areas) > 1:
-                            st.markdown(f"<div style='margin:10px 0 5px; font-weight:600; color:#AD1457;'>📌 {area} 영역</div>", unsafe_allow_html=True)
-                        
-                        # 문제를 카드 형태로 표시
-                        q_cols = st.columns(min(area_qs, 5))
-                        for j in range(area_qs):
-                            q_idx = area_idx * (total_q // len(areas)) + j
-                            if q_idx >= total_q:
-                                break
-                            with q_cols[j % 5]:
-                                is_correct = st.toggle(
-                                    f"Q{q_idx+1}",
-                                    value=True,
-                                    key=f"ox_{q_idx}",
-                                    help="ON=정답, OFF=오답"
-                                )
-                                new_feedback.append(is_correct)
-                
-                correct = sum(new_feedback)
-                pct = int(correct/total_q*100) if total_q > 0 else 0
+                summary_cols = st.columns(5)
+                pct = int(res.get('correct_answers', 0) / total_q * 100) if total_q > 0 else 0
                 color = "#4CAF50" if pct >= 80 else "#FF9800" if pct >= 60 else "#F44336"
                 
+                with summary_cols[0]:
+                    st.markdown(f"""
+                    <div style="background:white; padding:1.2rem; border-radius:15px; border:2px solid {color}; text-align:center;">
+                        <div style="font-size:2.5rem; font-weight:800; color:{color};">{pct}%</div>
+                        <div style="font-size:0.8rem; color:#888;">총 정답률</div>
+                        <div style="font-size:0.75rem; color:#666;">{res.get('correct_answers',0)}/{total_q}문항</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                area_icons = {"어휘": "📝", "문법": "📐", "독해": "📖", "듣기": "🎧"}
+                for i, (area, acc) in enumerate(area_acc.items()):
+                    if i >= 4: break
+                    q_cnt = area_qs.get(area, '?')
+                    icon = area_icons.get(area, "📋")
+                    a_color = "#4CAF50" if acc >= 80 else "#FF9800" if acc >= 60 else "#F44336"
+                    with summary_cols[i + 1]:
+                        st.markdown(f"""
+                        <div style="background:white; padding:1.2rem; border-radius:15px; border:2px solid {a_color}20; text-align:center; border-left: 4px solid {a_color};">
+                            <div style="font-size:0.9rem;">{icon} {area}</div>
+                            <div style="font-size:1.8rem; font-weight:800; color:{a_color};">{acc}%</div>
+                            <div style="font-size:0.75rem; color:#888;">{q_cnt}문항</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                # ── 영역별 정답률 게이지 ──
+                st.markdown("#### 📈 영역별 정답률")
+                for area, acc in area_acc.items():
+                    icon = area_icons.get(area, "📋")
+                    a_color = "#4CAF50" if acc >= 80 else "#FF9800" if acc >= 60 else "#F44336"
+                    st.markdown(f"""
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                        <span style="min-width:70px; font-weight:600;">{icon} {area}</span>
+                        <div style="flex:1; background:#f0f0f0; border-radius:10px; height:24px;">
+                            <div style="background:{a_color}; width:{acc}%; height:24px; border-radius:10px; display:flex; align-items:center; justify-content:flex-end; padding-right:8px;">
+                                <span style="color:white; font-size:0.8rem; font-weight:700;">{acc}%</span>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                # ── 문제별 정답 토글 ──
+                st.markdown("#### ✅ 문제별 정답 확인")
+                st.caption("각 문제를 클릭하여 정답(ON)/오답(OFF)을 토글하세요.")
+                
+                questions = res.get('questions', [])
+                new_feedback = []
+                
+                if questions:
+                    # AI가 문제별 상세 정보를 제공한 경우
+                    area_colors = {"어휘": "#E91E63", "문법": "#9C27B0", "독해": "#2196F3", "듣기": "#FF9800"}
+                    
+                    # 영역별로 그룹화
+                    area_groups = {}
+                    for q in questions:
+                        a = q.get('area', '기타')
+                        if a not in area_groups:
+                            area_groups[a] = []
+                        area_groups[a].append(q)
+                    
+                    for area, area_questions_list in area_groups.items():
+                        acc = area_acc.get(area, 0)
+                        a_color = area_colors.get(area, "#888")
+                        st.markdown(f"""
+                        <div style="background:{a_color}10; border-left:4px solid {a_color}; padding:8px 12px; border-radius:0 8px 8px 0; margin:12px 0 6px;">
+                            <span style="font-weight:700; color:{a_color};">{area_icons.get(area,'')} {area}</span>
+                            <span style="font-size:0.85rem; color:#666;"> ({len(area_questions_list)}문항 | 정답률 {acc}%)</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        for q in area_questions_list:
+                            q_num = q.get('number', 0)
+                            is_correct_val = q.get('correct', True)
+                            q_type = q.get('type', '')
+                            q_summary = q.get('summary', '')
+                            
+                            c1, c2, c3 = st.columns([0.5, 3, 7])
+                            with c1:
+                                is_correct = st.toggle(
+                                    f"Q{q_num}",
+                                    value=is_correct_val,
+                                    key=f"ox_{q_num}",
+                                    help=f"{area} 영역 - 정답 토글"
+                                )
+                                new_feedback.append(is_correct)
+                            with c2:
+                                st.markdown(f"**{q_type}**")
+                            with c3:
+                                st.markdown(f"<span style='color:#666; font-size:0.85rem;'>{q_summary}</span>", unsafe_allow_html=True)
+                else:
+                    # 문제별 상세 정보 없으면 기본 표시
+                    cols = st.columns(5)
+                    for i in range(total_q):
+                        with cols[i % 5]:
+                            is_correct = st.toggle(
+                                f"Q{i + 1}",
+                                value=True,
+                                key=f"ox_{i}",
+                                help="ON=정답, OFF=오답"
+                            )
+                            new_feedback.append(is_correct)
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                # ── 최종 정답률 카드 ──
+                correct = sum(new_feedback)
+                final_pct = int(correct / total_q * 100) if total_q > 0 else 0
+                final_color = "#4CAF50" if final_pct >= 80 else "#FF9800" if final_pct >= 60 else "#F44336"
+                
                 st.markdown(f"""
-                <div style="background:white; padding:1.5rem; border-radius:15px; border:1px solid #FCE4EC; margin:1rem 0;">
+                <div style="background: linear-gradient(135deg, {final_color}10, {final_color}05); padding:1.5rem; border-radius:15px; border:2px solid {final_color}40; margin:1rem 0;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <div>
-                            <span style="font-size:1.2rem; font-weight:700;">📊 최종 정답률</span>
+                            <span style="font-size:1.3rem; font-weight:700;">📊 최종 정답률</span>
+                            <span style="font-size:0.85rem; color:#888;"> (수동 수정 반영)</span>
                         </div>
                         <div style="text-align:right;">
-                            <span style="font-size:2rem; font-weight:800; color:{color};">{pct}%</span>
+                            <span style="font-size:2.2rem; font-weight:800; color:{final_color};">{final_pct}%</span>
                             <span style="font-size:1rem; color:#888;"> ({correct}/{total_q})</span>
                         </div>
                     </div>
-                    <div style="background:#f0f0f0; border-radius:10px; height:16px; margin-top:10px;">
-                        <div style="background:{color}; width:{pct}%; height:16px; border-radius:10px; transition:width 0.5s;"></div>
+                    <div style="background:#f0f0f0; border-radius:10px; height:18px; margin-top:10px;">
+                        <div style="background:{final_color}; width:{final_pct}%; height:18px; border-radius:10px; transition:width 0.5s;"></div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
-                if res.get('area_accuracy_percent'):
-                    df_chart = pd.DataFrame([{"영역": k, "정답률": v} for k, v in res['area_accuracy_percent'].items()])
-                    st.bar_chart(df_chart.set_index("영역"), height=200)
                 
+                # ── AI 분석 요약 ──
                 col1, col2 = st.columns(2)
-                if col1.button("💾 성적으로 저장"):
+                with col1:
+                    st.markdown(f"""
+                    <div style="background:#FFF5F8; padding:1rem; border-radius:12px; border-left:4px solid #E91E63; margin-bottom:1rem;">
+                        <div style="font-weight:700; color:#AD1457; margin-bottom:5px;">🔍 취약점 분석</div>
+                        <div style="font-size:0.9rem; color:#444;">{weakness}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with col2:
+                    st.markdown(f"""
+                    <div style="background:#F3E5F5; padding:1rem; border-radius:12px; border-left:4px solid #9C27B0; margin-bottom:1rem;">
+                        <div style="font-weight:700; color:#7B1FA2; margin-bottom:5px;">💊 학습 처방</div>
+                        <div style="font-size:0.9rem; color:#444;">{prescription}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # ── 액션 버튼 ──
+                col1, col2 = st.columns(2)
+                if col1.button("💾 성적으로 저장", type="primary", use_container_width=True):
                     s_obj = student_map[sel_s]
-                    add_student_history(s_obj["id"], "성적", f"[{week}] {correct}/{total_q} 정답. {res.get('weakness_analysis','')}", week)
+                    add_student_history(s_obj["id"], "성적", f"[{week}] {correct}/{total_q} 정답({final_pct}%). {weakness}", week)
                     add_score(s_obj["id"], 
-                              res['area_accuracy_percent'].get('듣기', 0),
-                              res['area_accuracy_percent'].get('어휘', 0),
-                              res['area_accuracy_percent'].get('문법', 0),
-                              res['area_accuracy_percent'].get('독해', 0),
+                              area_acc.get('듣기', 0),
+                              area_acc.get('어휘', 0),
+                              area_acc.get('문법', 0),
+                              area_acc.get('독해', 0),
                               f"{week} OCR")
                     st.toast("성적에 저장 완료!")
                     st.rerun()
                 
-                if col2.button("📤 학부모님께 문자 전송"):
+                if col2.button("📤 학부모님께 문자 전송", use_container_width=True):
                     s_obj = student_map[sel_s]
-                    msg = f"[앨리영어] {s_obj['name']} {week} 시험결과: {correct}/{total_q}({int(correct/total_q*100)}%)\n취약: {res.get('weakness_analysis','')}\n처방: {res.get('prescription','')}"
+                    msg = f"[앨리영어] {s_obj['name']} {week} 시험결과: {correct}/{total_q}({final_pct}%)\n취약: {weakness}\n처방: {prescription}"
                     send_message(st.session_state.solapi_key_input, st.session_state.solapi_secret_input, s_obj['parent_phone'], st.session_state.solapi_from_input, msg)
                     st.toast("문자 전송 완료!")
     else:
@@ -628,6 +780,18 @@ elif st.session_state.menu == "📈 성적 & 리포트":
                         <h1 style="color: #D81B60; margin: 0;">🎀 {month} 월간 성적 리포트 🎀</h1>
                         <h3 style="color: #AD1457; margin-top: 0.5rem;">학생명: {s_obj['name']} | {s_obj.get('school_name','')}</h3>
                     </div>
+                """, unsafe_allow_html=True)
+                
+                # 전체 평균 점수 계산
+                total_avg = int((int(avg['listening']) + int(avg['vocabulary']) + int(avg['grammar']) + int(avg['reading'])) / 4)
+                total_color = "#4CAF50" if total_avg >= 80 else "#FF9800" if total_avg >= 60 else "#F44336"
+                
+                # 전체 평균 점수 카드
+                st.markdown(f"""
+                <div style="background:{total_color}10; padding:1rem; border-radius:15px; border:2px solid {total_color}40; text-align:center; margin-bottom:1.5rem;">
+                    <span style="font-size:1rem; font-weight:600;">전체 평균 점수</span><br>
+                    <span style="font-size:2.5rem; font-weight:800; color:{total_color};">{total_avg}점</span>
+                </div>
                 """, unsafe_allow_html=True)
                 
                 # 점수 표
@@ -795,12 +959,15 @@ elif st.session_state.menu == "🏫 학교별 기출":
                         
                         # AI 분석
                         prompt = f"다음은 {sch} {g} {sem} 기출문제 분석입니다. 문제 출제 경향, 난이도, 주요 포인트를 3~5줄로 분석해주세요:\n\n{all_text[:5000]}"
-                        model = get_model(st.session_state.gemini_key_input)
-                        if model:
-                            response = model.generate_content(prompt)
+                        try:
+                            response, model_name = _try_models_generate(
+                                get_client(st.session_state.gemini_key_input), 
+                                prompt,
+                                st.session_state.gemini_key_input
+                            )
                             ai_report = response.text
-                        else:
-                            ai_report = "AI 분석 실패"
+                        except Exception as e:
+                            ai_report = f"AI 분석 실패: {str(e)}"
                         
                         save_school_exam(sch, g, "2024", sem, "", ai_report)
                         st.success("분석 및 저장 완료!")
@@ -921,8 +1088,8 @@ elif st.session_state.menu == "📨 알림톡 발송":
             st.divider()
             st.markdown("#### ⚙️ 카카오 알림톡 설정")
             c1, c2 = st.columns(2)
-            pf_id = c1.text_input("카카오 채널 ID (pfId)", value="@앨리영어")
-            template_id = c2.text_input("템플릿 ID", placeholder="템플릿 승인 완료 후 입력")
+            pf_id = c1.text_input("카카오 채널 ID (pfId)", value="KA01PF260529142530005vhA1Xuvwf5K")
+            template_id = c2.text_input("템플릿 ID", value="KA01TP260529143311427H1YO1TIAFCF")
             
             if st.button("📨 발송하기", type="primary", use_container_width=True):
                 if not parent_phone:
@@ -930,7 +1097,7 @@ elif st.session_state.menu == "📨 알림톡 발송":
                 elif not api_key or api_key in ("", "YOUR_SOLAPI_KEY"):
                     st.error("⚠️ 설정에서 Solapi API Key를 입력해주세요.")
                 elif not template_id:
-                    # 일반 문자(LMS) 발송
+                    # 카카오 알림톡 미승인 시 일반 문자(LMS) 발송
                     msg_parts = [f"[앨리영어] {s['name']} 학생 알림"]
                     if send_attendance:
                         emoji = {"출석": "✅", "결석": "❌", "지각": "⏰", "영상보강": "📺", "미입력": "❓"}
@@ -942,6 +1109,7 @@ elif st.session_state.menu == "📨 알림톡 발송":
                     msg_parts.append("❤️ 대치앨리영어")
                     
                     msg = "\n".join(msg_parts)
+                    st.warning("⚠️ 템플릿 ID가 없어 일반 문자(LMS)로 발송됩니다. 카카오 알림톡을 이용하려면 템플릿 승인이 필요합니다.")
                     res = send_message(api_key, api_secret, parent_phone, from_number, msg)
                     st.session_state.last_send_result = res
                     st.rerun()
@@ -994,8 +1162,8 @@ elif st.session_state.menu == "📨 알림톡 발송":
             batch_send_report = bc1.checkbox("📊 월간 리포트 포함", value=False, key="batch_send_report")
             
             c1, c2 = st.columns(2)
-            batch_pf_id = c1.text_input("카카오 채널 ID", value="@앨리영어", key="batch_pf")
-            batch_template_id = c2.text_input("템플릿 ID", key="batch_tpl")
+            batch_pf_id = c1.text_input("카카오 채널 ID", value="KA01PF260529142530005vhA1Xuvwf5K", key="batch_pf")
+            batch_template_id = c2.text_input("템플릿 ID", value="KA01TP260529143311427H1YO1TIAFCF", key="batch_tpl")
             
             st.markdown("##### 📱 발송 내용 미리보기 (첫번째 학생 기준)")
             if students_in_class:
