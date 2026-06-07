@@ -120,6 +120,24 @@ def init_database():
         )
     """)
 
+    # 8. 반별 영역 설정 테이블
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS class_areas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL,
+            area_name TEXT NOT NULL,
+            FOREIGN KEY (class_id) REFERENCES classes(id)
+        )
+    """)
+
+    # 9. student_scores 마이그레이션 (score_details 컬럼)
+    cursor.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='student_scores'")
+    if cursor.fetchone()[0] > 0:
+        cursor.execute("PRAGMA table_info(student_scores)")
+        score_cols = [c[1] for c in cursor.fetchall()]
+        if 'score_details' not in score_cols:
+            cursor.execute("ALTER TABLE student_scores ADD COLUMN score_details TEXT DEFAULT ''")
+
     schools_list = ["대치중학교", "대청중학교", "단대부중", "숙명여중", "역삼중학교"]
     for sname in schools_list:
         cursor.execute("INSERT OR IGNORE INTO schools (name) VALUES (?)", (sname,))
@@ -433,25 +451,25 @@ def delete_attendance(attendance_id):
     conn.close()
 
 # ---------- 성적 ----------
-def add_score(student_id, listening, vocabulary, grammar, reading, test_name="", date_str=None):
+def add_score(student_id, listening, vocabulary, grammar, reading, test_name="", date_str=None, score_details=""):
     if not date_str: date_str = datetime.now().strftime("%Y-%m-%d")
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO student_scores (student_id, date, listening, vocabulary, grammar, reading, test_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (student_id, date_str, listening, vocabulary, grammar, reading, test_name))
+        INSERT INTO student_scores (student_id, date, listening, vocabulary, grammar, reading, test_name, score_details)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (student_id, date_str, listening, vocabulary, grammar, reading, test_name, score_details))
     conn.commit()
     conn.close()
 
-def update_score(score_id, listening, vocabulary, grammar, reading, test_name):
+def update_score(score_id, listening, vocabulary, grammar, reading, test_name, score_details=""):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE student_scores 
-        SET listening=?, vocabulary=?, grammar=?, reading=?, test_name=?
+        SET listening=?, vocabulary=?, grammar=?, reading=?, test_name=?, score_details=?
         WHERE id=?
-    """, (listening, vocabulary, grammar, reading, test_name, score_id))
+    """, (listening, vocabulary, grammar, reading, test_name, score_details, score_id))
     conn.commit()
     conn.close()
 
@@ -534,3 +552,78 @@ def get_weekly_history(student_id, start_date, end_date):
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+# ---------- 성적 삭제 ----------
+def delete_score(score_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM student_scores WHERE id=?", (score_id,))
+    conn.commit()
+    conn.close()
+
+# ---------- 거래내역 삭제 ----------
+def delete_payment_transaction(transaction_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM payment_transactions WHERE id=?", (transaction_id,))
+    conn.commit()
+    conn.close()
+
+# ---------- 반별 영역 관리 ----------
+def get_class_areas(class_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM class_areas WHERE class_id = ? ORDER BY id", (class_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def add_class_area(class_id, area_name):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO class_areas (class_id, area_name) VALUES (?, ?)", (class_id, area_name))
+    conn.commit()
+    conn.close()
+
+def delete_class_area(area_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM class_areas WHERE id=?", (area_id,))
+    conn.commit()
+    conn.close()
+
+# ---------- 주간 출석 조회 ----------
+def get_week_attendance(student_id, base_date=None):
+    """이번 주 해당 반 수업일의 출석 정보 반환 (최대 2개)"""
+    if not base_date:
+        base_date = datetime.now()
+    student = get_student(student_id)
+    if not student:
+        return []
+    class_id = student['class_id']
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT day_of_week FROM classes WHERE id=?", (class_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return []
+    day_map = {"월": 0, "화": 1, "수": 2, "목": 3, "금": 4, "토": 5, "일": 6}
+    class_days = [day_map[d.strip()] for d in row['day_of_week'].split('/') if d.strip() in day_map]
+    monday = base_date - timedelta(days=base_date.weekday())
+    week_dates = []
+    for day_idx in class_days:
+        date = monday + timedelta(days=day_idx)
+        if date <= base_date:
+            week_dates.append(date)
+    week_dates = sorted(week_dates, reverse=True)[:2]
+    results = []
+    for d in week_dates:
+        date_str = d.strftime("%Y-%m-%d")
+        att = get_attendance_by_date(student_id, date_str)
+        results.append({
+            'date': date_str,
+            'day_name': ['월', '화', '수', '목', '금', '토', '일'][d.weekday()],
+            'status': att['status'] if att else '미입력'
+        })
+    return results

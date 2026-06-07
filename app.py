@@ -260,7 +260,7 @@ elif st.session_state.menu == "📅 출석부":
                     except:
                         default_date = datetime.now()
                     
-                    input_date = st.date_input("날짜 선택 (달력 날짜 클릭 or 직접 선택)", value=default_date, key="att_input_date")
+                    input_date = st.date_input("날짜 선택 (달력 날짜 클릭 or 직접 선택)", value=default_date, key=f"att_input_date_{s['id']}")
                     input_date_str = input_date.strftime("%Y-%m-%d")
                     
                     cols = st.columns([3, 3, 2])
@@ -353,6 +353,34 @@ elif st.session_state.menu == "⚙️ 학원 관리":
             if st.button("삭제", key=f"del_c_{c['id']}"): 
                 delete_class(c['id'])
                 st.rerun()
+        
+        st.divider()
+        st.markdown("#### 📝 반별 영역 관리 (시험 영역)")
+        if all_c:
+            sel_class_for_area = st.selectbox("영역 관리할 반 선택", [c['name'] for c in all_c], key="area_class_select")
+            c_obj_area = next(c for c in all_c if c['name'] == sel_class_for_area)
+            
+            with st.form("add_area_form"):
+                new_area_name = st.text_input("새 영역 이름", placeholder="예: 어휘, 문법, 독해, 듣기")
+                if st.form_submit_button("➕ 영역 추가"):
+                    if new_area_name.strip():
+                        add_class_area(c_obj_area['id'], new_area_name.strip())
+                        st.toast(f"영역 '{new_area_name.strip()}' 추가 완료!")
+                        st.rerun()
+            
+            existing_areas = get_class_areas(c_obj_area['id'])
+            if existing_areas:
+                for area in existing_areas:
+                    c1, c2 = st.columns([5, 1])
+                    c1.write(f"  📌 {area['area_name']}")
+                    if c2.button("🗑️", key=f"del_area_{area['id']}"):
+                        delete_class_area(area['id'])
+                        st.toast(f"영역 '{area['area_name']}' 삭제 완료!")
+                        st.rerun()
+            else:
+                st.info("영역이 없습니다. 위에서 추가해주세요.")
+        else:
+            st.info("반을 먼저 등록해주세요.")
 
     with t3:
         new_sch = st.text_input("학교명")
@@ -712,146 +740,56 @@ elif st.session_state.menu == "📈 성적 & 리포트":
         sel_s_name = st.selectbox("학생 선택", [f"{s['name']} ({s['school_name'] or '미지정'})" for s in all_s])
         s_obj = next(s for s in all_s if f"{s['name']} ({s['school_name'] or '미지정'})" == sel_s_name)
         
-        t1, t2 = st.tabs(["📝 성적 입력/수정", "📜 월간 성적표"])
-        with t1:
-            with st.form("score_form"):
-                st.markdown("#### 📝 새 성적 입력")
-                c1, c2 = st.columns(2)
-                tn = c1.text_input("시험명", value=f"{datetime.now().strftime('%m월 %d일')} 테스트")
-                dt = c1.date_input("날짜")
-                L = c2.slider("듣기(Listening)", 0, 100, 80)
-                V = c2.slider("어휘(Vocabulary)", 0, 100, 80)
-                G = c2.slider("문법(Grammar)", 0, 100, 80)
-                R = c2.slider("독해(Reading)", 0, 100, 80)
-                if st.form_submit_button("저장"):
-                    add_score(s_obj['id'], L, V, G, R, tn, dt.strftime("%Y-%m-%d"))
-                    st.toast("성적 저장 완료!")
-                    st.rerun()
-            
-            st.divider()
-            st.markdown("#### ✏️ 기존 성적 수정/삭제")
-            scores = get_student_scores(s_obj['id'])
-            if scores:
-                for sc in scores:
-                    with st.expander(f"📅 {sc['date']} - {sc['test_name']} (듣기{sc['listening']} 어휘{sc['vocabulary']} 문법{sc['grammar']} 독해{sc['reading']})"):
-                        with st.form(f"edit_score_{sc['id']}"):
-                            c1, c2 = st.columns(2)
-                            new_tn = c1.text_input("시험명", value=sc['test_name'])
-                            new_L = c2.slider("듣기", 0, 100, int(sc['listening']))
-                            new_V = c2.slider("어휘", 0, 100, int(sc['vocabulary']))
-                            new_G = c2.slider("문법", 0, 100, int(sc['grammar']))
-                            new_R = c2.slider("독해", 0, 100, int(sc['reading']))
-                            cb1, cb2 = st.columns(2)
-                            if cb1.form_submit_button("💾 수정 저장"):
-                                update_score(sc['id'], new_L, new_V, new_G, new_R, new_tn)
-                                st.rerun()
-                            if cb2.form_submit_button("🗑️ 삭제"):
-                                delete_score(sc['id'])
-                                st.rerun()
-            else:
-                st.info("성적 기록이 없습니다.")
+        class_areas_list = get_class_areas(s_obj.get('class_id', 0)) if s_obj.get('class_id') else []
+        area_names = [a['area_name'] for a in class_areas_list] if class_areas_list else ["듣기", "어휘", "문법", "독해"]
         
-        with t2:
-            month = st.selectbox("월 선택", [f"2026-{i:02d}" for i in range(1, 13)], index=datetime.now().month-1)
-            
-            col1, col2 = st.columns(2)
-            if col1.button("📊 AI 리포트 생성", type="primary"):
-                with st.spinner("AI 리포트 작성 중..."):
-                    avg = get_monthly_avg_scores(s_obj['id'], month)
-                    if avg:
-                        st.session_state.monthly_avg = avg
-                        st.session_state.monthly_summary = generate_monthly_summary(st.session_state.gemini_key_input, s_obj, avg)
-                    else:
-                        st.warning("해당 월의 성적 기록이 없습니다.")
-            
-            if col2.button("🔄 다른 총평 생성"):
-                if st.session_state.monthly_avg:
-                    with st.spinner("새로운 총평 생성 중..."):
-                        st.session_state.monthly_summary = generate_monthly_summary(st.session_state.gemini_key_input, s_obj, st.session_state.monthly_avg)
-                    st.rerun()
-            
-            if st.session_state.monthly_avg:
-                avg = st.session_state.monthly_avg
-                
-                # 성적표 카드
-                st.markdown(f"""
-                <div class="report-card">
-                    <div style="text-align: center; border-bottom: 2px solid #D81B60; padding-bottom: 1rem; margin-bottom: 2rem;">
-                        <h1 style="color: #D81B60; margin: 0;">🎀 {month} 월간 성적 리포트 🎀</h1>
-                        <h3 style="color: #AD1457; margin-top: 0.5rem;">학생명: {s_obj['name']} | {s_obj.get('school_name','')}</h3>
-                    </div>
-                """, unsafe_allow_html=True)
-                
-                # 전체 평균 점수 계산
-                total_avg = int((int(avg['listening']) + int(avg['vocabulary']) + int(avg['grammar']) + int(avg['reading'])) / 4)
-                total_color = "#4CAF50" if total_avg >= 80 else "#FF9800" if total_avg >= 60 else "#F44336"
-                
-                # 전체 평균 점수 카드
-                st.markdown(f"""
-                <div style="background:{total_color}10; padding:1rem; border-radius:15px; border:2px solid {total_color}40; text-align:center; margin-bottom:1.5rem;">
-                    <span style="font-size:1rem; font-weight:600;">전체 평균 점수</span><br>
-                    <span style="font-size:2.5rem; font-weight:800; color:{total_color};">{total_avg}점</span>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # 점수 표
-                scores_data = {
-                    "영역": ["듣기", "어휘", "문법", "독해"],
-                    "점수": [int(avg['listening']), int(avg['vocabulary']), int(avg['grammar']), int(avg['reading'])]
-                }
-                df_scores = pd.DataFrame(scores_data)
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # 게이지 차트
-                    for i, row in df_scores.iterrows():
-                        score = row['점수']
-                        color = "#4CAF50" if score >= 80 else "#FF9800" if score >= 60 else "#F44336"
-                        st.markdown(f"""
-                        <div style="margin-bottom: 1rem;">
-                            <div style="display: flex; justify-content: space-between;">
-                                <span><b>{row['영역']}</b></span>
-                                <span style="font-weight: 700; color: {color};">{score}점</span>
-                            </div>
-                            <div style="background: #f0f0f0; border-radius: 10px; height: 12px;">
-                                <div style="background: {color}; width: {score}%; height: 12px; border-radius: 10px;"></div>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                
-                with col2:
-                    chart = alt.Chart(df_scores).mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10).encode(
-                        x=alt.X('영역:N', title=None),
-                        y=alt.Y('점수:Q', scale=alt.Scale(domain=[0, 100]), title="점수"),
-                        color=alt.Color('영역:N', scale=alt.Scale(
-                            domain=["듣기", "어휘", "문법", "독해"],
-                            range=["#D81B60", "#AD1457", "#E91E63", "#F48FB1"]
-                        )),
-                        tooltip=['영역', '점수']
-                    ).properties(height=250)
-                    st.altair_chart(chart, use_container_width=True)
-                
-                # 총평
-                st.markdown(f"""
-                    <div style="margin: 1.5rem 0; padding: 1.5rem; background: linear-gradient(135deg, #FFF5F8, #FCE4EC); border-radius: 15px; border-left: 5px solid #D81B60;">
-                        <h4 style="color: #D81B60; margin-top: 0;">💡 원장님 총평</h4>
-                        <p style="font-size: 1.05rem; line-height: 1.6; color: #444;">{st.session_state.monthly_summary or '총평을 생성해주세요.'}</p>
-                    </div>
-                """, unsafe_allow_html=True)
-                
-                st.markdown("</div>", unsafe_allow_html=True)
-                
-                # 전송 버튼들
-                col1, col2 = st.columns(2)
-                if col1.button("📤 학부모님께 리포트 전송"):
-                    msg = f"[{month} 리포트] {s_obj['name']} 학생 성적\n듣기:{int(avg['listening'])}점 어휘:{int(avg['vocabulary'])}점 문법:{int(avg['grammar'])}점 독해:{int(avg['reading'])}점\n총평: {st.session_state.monthly_summary}"
-                    res = send_message(st.session_state.solapi_key_input, st.session_state.solapi_secret_input, s_obj['parent_phone'], st.session_state.solapi_from_input, msg)
-                    st.toast("리포트 전송 완료!")
-                
-                if col2.button("📨 카카오 알림톡으로 전송 (알림톡 메뉴)"):
-                    st.session_state.menu = "📨 알림톡 발송"
-                    st.rerun()
+        st.markdown("#### 📝 새 성적 입력")
+        with st.form("score_form"):
+            c1, c2 = st.columns(2)
+            tn = c1.text_input("시험명", value=f"{datetime.now().strftime('%m월 %d일')} 테스트")
+            dt = c1.date_input("날짜")
+            area_scores = {}
+            for i, area_name in enumerate(area_names):
+                with (c1 if i < len(area_names) // 2 else c2):
+                    area_scores[area_name] = st.text_input(area_name, placeholder="예: 5/9", key=f"new_{area_name}")
+            if st.form_submit_button("저장"):
+                score_details = ", ".join([f"{k}: {v}" for k, v in area_scores.items() if v])
+                add_score(s_obj['id'], 0, 0, 0, 0, tn, dt.strftime("%Y-%m-%d"), score_details)
+                st.toast("성적 저장 완료!")
+                st.rerun()
+        st.divider()
+        st.markdown("#### ✏️ 기존 성적 수정/삭제")
+        scores = get_student_scores(s_obj['id'])
+        if scores:
+            for sc in scores:
+                display_text = sc.get('score_details', '') or f"합계:{sc['listening']}"
+                with st.expander(f"📅 {sc['date']} - {sc['test_name']} ({display_text})"):
+                    with st.form(f"edit_score_{sc['id']}"):
+                        c1, c2 = st.columns(2)
+                        new_tn = c1.text_input("시험명", value=sc['test_name'])
+                        new_dt = c1.date_input("날짜", value=datetime.strptime(sc['date'], "%Y-%m-%d") if sc['date'] else datetime.now())
+                        old_details = sc.get('score_details', '')
+                        old_scores = {}
+                        if old_details:
+                            for part in old_details.split(','):
+                                if ':' in part:
+                                    k, v = part.split(':', 1)
+                                    old_scores[k.strip()] = v.strip()
+                        new_scores = {}
+                        for i, area_name in enumerate(area_names):
+                            default_val = old_scores.get(area_name, '')
+                            with (c1 if i < len(area_names) // 2 else c2):
+                                new_scores[area_name] = st.text_input(area_name, value=default_val, key=f"edit_{sc['id']}_{area_name}")
+                        new_details = ", ".join([f"{k}: {v}" for k, v in new_scores.items() if v])
+                        cb1, cb2 = st.columns(2)
+                        if cb1.form_submit_button("💾 수정 저장"):
+                            update_score(sc['id'], 0, 0, 0, 0, new_tn, new_details)
+                            st.rerun()
+                        if cb2.form_submit_button("🗑️ 삭제"):
+                            delete_score(sc['id'])
+                            st.rerun()
+        else:
+            st.info("성적 기록이 없습니다.")
     else:
         st.info("학생이 없습니다.")
 
@@ -899,21 +837,20 @@ elif st.session_state.menu == "💰 횟수 관리":
         
         st.divider()
         
-        # 거래 내역
         st.markdown("#### 📋 거래 내역")
         transactions = get_payment_transactions(s['id'])
         if transactions:
-            tx_data = []
             for t in transactions:
-                emoji = "💰" if t['type'] == 'charge' else "📉"
-                tx_data.append({
-                    "날짜": t['date'],
-                    "구분": "충전" if t['type'] == 'charge' else "차감",
-                    "변동": f"+{t['amount']}회" if t['amount'] > 0 else f"{t['amount']}회",
-                    "잔여횟수": f"{t['balance_after']}회",
-                    "비고": t['note']
-                })
-            st.dataframe(pd.DataFrame(tx_data), use_container_width=True, hide_index=True)
+                c1, c2, c3, c4, c5, c6 = st.columns([2, 1, 1.5, 1.5, 3, 1])
+                c1.write(t['date'])
+                c2.write("💰" if t['type'] == 'charge' else "📉")
+                c3.write(f"+{t['amount']}회" if t['amount'] > 0 else f"{t['amount']}회")
+                c4.write(f"{t['balance_after']}회")
+                c5.write(t['note'])
+                if c6.button("🗑️", key=f"del_tx_{t['id']}"):
+                    delete_payment_transaction(t['id'])
+                    st.toast("거래 내역 삭제 완료!")
+                    st.rerun()
         else:
             st.info("거래 내역이 없습니다.")
         
@@ -1032,16 +969,13 @@ elif st.session_state.menu == "📨 알림톡 발송":
     from_number = st.session_state.solapi_from_input
     
     with t1:
-        st.markdown("### 👤 학생 선택 후 알림톡 발송")
+        st.markdown("### 📋 주간 Report 발송")
         if all_students:
             student_map = {f"{s['name']} ({s['school_name'] or '미지정'})": s for s in all_students}
             sel_name = st.selectbox("학생 선택", list(student_map.keys()), key="alim_student")
             s = student_map[sel_name]
             
-            # 학부모 연락처 입력
-            parent_phone = st.text_input("📱 학부모 연락처", value=s.get('parent_phone', ''), 
-                                          placeholder="01012345678 (숫자만 입력)",
-                                          help="연락처를 직접 입력하거나 학생 정보에 등록된 번호를 사용하세요")
+            parent_phone = st.text_input("📱 학부모 연락처", value=s.get('parent_phone', ''), placeholder="01012345678")
             
             col1, col2 = st.columns(2)
             with col1:
@@ -1049,88 +983,116 @@ elif st.session_state.menu == "📨 알림톡 발송":
                 st.markdown(f"**학교:** {s['school_name'] or '미지정'}")
                 st.markdown(f"**반:** {s.get('class_name', '')}")
             with col2:
-                st.markdown(f"**잔여횟수:** {s['remaining_sessions']}회")
                 st.markdown(f"**학부모 연락처:** {s.get('parent_phone', '미등록')}")
             
             st.divider()
-            st.markdown("#### 📋 알림톡 보낼 정보 선택")
             
-            c1, c2 = st.columns(2)
-            send_attendance = c1.checkbox("✅ 출석 정보 포함", value=True)
-            send_test = c2.checkbox("📝 시험 결과 포함", value=False)
-            send_report = c1.checkbox("📊 월간 리포트 포함", value=False)
-            
-            # 출석 정보
-            att_info = {"status": "출석", "date": st.session_state.sel_date}
-            if send_attendance:
-                att = get_attendance_by_date(s["id"], st.session_state.sel_date)
-                if att:
-                    att_info = att
-                else:
-                    c1.info(f"📅 {st.session_state.sel_date} 출석 정보가 없습니다.")
-            
-            # 시험 결과
-            test_info = None
-            if send_test:
-                histories = get_student_history(s['id'])
-                if histories:
-                    test_info = histories[0]
-            
-            # 월간 리포트
-            report_info = None
-            avg_scores = None
-            if send_report:
-                month = datetime.now().strftime("%Y-%m")
-                avg_scores = get_monthly_avg_scores(s['id'], month)
-                if avg_scores:
-                    report_info = generate_monthly_summary(st.session_state.gemini_key_input, s, avg_scores)
+            st.markdown("#### 📅 이번 주 출석 현황")
+            week_att = get_week_attendance(s['id'])
+            if week_att:
+                for att in week_att:
+                    emoji = {"출석": "✅", "결석": "❌", "지각": "⏰", "영상보강": "📺", "미입력": "❓"}
+                    st.markdown(f"**{att['date']} ({att['day_name']})**: {emoji.get(att['status'], '❓')} {att['status']}")
+            else:
+                st.info("이번 주 수업일이 없습니다.")
             
             st.divider()
+            
+            st.markdown("#### 📝 시험결과 (영역별 점수)")
+            c_obj = next((c for c in get_all_classes() if c['name'] == s.get('class_name', '')), None)
+            if c_obj:
+                class_areas = get_class_areas(c_obj['id'])
+                with st.form("add_area_form_t1", clear_on_submit=True):
+                    new_area = st.text_input("새 영역 이름", placeholder="예: 어휘, 문법, 독해, 듣기")
+                    if st.form_submit_button("➕ 영역 추가"):
+                        if new_area.strip():
+                            add_class_area(c_obj['id'], new_area.strip())
+                            st.toast(f"영역 '{new_area.strip()}' 추가 완료!")
+                            st.rerun()
+                area_scores = {}
+                if class_areas:
+                    cols = st.columns(min(len(class_areas), 4))
+                    for i, area in enumerate(class_areas):
+                        with cols[i % len(cols)]:
+                            score = st.text_input(area['area_name'], placeholder="예: 5/9", key=f"area_score_{area['id']}")
+                            area_scores[area['area_name']] = score
+                    del_cols = st.columns(min(len(class_areas), 4))
+                    for i, area in enumerate(class_areas):
+                        with del_cols[i % len(del_cols)]:
+                            if st.button(f"🗑️ {area['area_name']}", key=f"del_area_{area['id']}"):
+                                delete_class_area(area['id'])
+                                st.toast(f"영역 '{area['area_name']}' 삭제 완료!")
+                                st.rerun()
+                else:
+                    st.info("영역을 추가해주세요.")
+            else:
+                st.info("반 정보를 찾을 수 없습니다.")
+            
+            st.divider()
+            
             st.markdown("#### ⚙️ 카카오 알림톡 설정")
             c1, c2 = st.columns(2)
-            pf_id = c1.text_input("카카오 채널 ID (pfId)", value="KA01PF260529142530005vhA1Xuvwf5K")
-            template_id = c2.text_input("템플릿 ID", value="KA01TP260529143311427H1YO1TIAFCF")
+            pf_id = c1.text_input("카카오 채널 ID (pfId)", value="KA01PF260529142530005vhA1Xuvwf5K", key="t1_pf")
+            template_id = c2.text_input("템플릿 ID", value="KA01TP260529143311427H1YO1TIAFCF", key="t1_tpl")
+            
+            st.markdown("#### 📱 발송 내용 미리보기")
+            preview_parts = [f"안녕하세요, {s['name']}학부모님.", "자신감을 키우는 대치앨리영어교육입니다.", ""]
+            preview_parts.append("📅 이번 주 출석 현황")
+            if week_att:
+                for att in week_att:
+                    preview_parts.append(f"• {att['date']} ({att['day_name']}): {att['status']}")
+            preview_parts.append("")
+            preview_parts.append("📝 시험결과")
+            if c_obj:
+                for area in get_class_areas(c_obj['id']):
+                    sv = st.session_state.get(f"area_score_{area['id']}", "")
+                    if sv:
+                        preview_parts.append(f"• {area['area_name']}: {sv}")
+            preview_parts.append("")
+            preview_parts.append("❤️ 대치앨리영어")
+            st.code("\n".join(preview_parts))
             
             if st.button("📨 발송하기", type="primary", use_container_width=True):
                 if not parent_phone:
                     st.error("⚠️ 학부모 연락처를 입력해주세요.")
                 elif not api_key or api_key in ("", "YOUR_SOLAPI_KEY"):
                     st.error("⚠️ 설정에서 Solapi API Key를 입력해주세요.")
-                elif not template_id:
-                    # 카카오 알림톡 미승인 시 일반 문자(LMS) 발송
-                    msg_parts = [f"[앨리영어] {s['name']} 학생 알림"]
-                    if send_attendance:
-                        emoji = {"출석": "✅", "결석": "❌", "지각": "⏰", "영상보강": "📺", "미입력": "❓"}
-                        msg_parts.append(f"📅 {att_info.get('date', st.session_state.sel_date)} 출석: {emoji.get(att_info.get('status',''),'')} {att_info.get('status','')} (잔여 {s['remaining_sessions']}회)")
-                    if test_info:
-                        msg_parts.append(f"📝 최근: {test_info['notes'][:50]}")
-                    if avg_scores:
-                        msg_parts.append(f"📊 월간: 듣기{int(avg_scores['listening'])} 어휘{int(avg_scores['vocabulary'])} 문법{int(avg_scores['grammar'])} 독해{int(avg_scores['reading'])}")
-                    msg_parts.append("❤️ 대치앨리영어")
-                    
-                    msg = "\n".join(msg_parts)
-                    st.warning("⚠️ 템플릿 ID가 없어 일반 문자(LMS)로 발송됩니다. 카카오 알림톡을 이용하려면 템플릿 승인이 필요합니다.")
-                    res = send_message(api_key, api_secret, parent_phone, from_number, msg)
-                    st.session_state.last_send_result = res
-                    st.rerun()
                 else:
-                    # 알림톡 발송
-                    variables = {
-                        "#{학생이름}": s['name'],
-                        "#{출석날짜}": att_info.get('date', st.session_state.sel_date),
-                        "#{출석상태}": att_info.get('status', '미입력'),
-                        "#{잔여횟수}": str(s['remaining_sessions']),
-                        "#{시험주차}": test_info.get('week_label', '') if test_info else '',
-                        "#{정답률}": test_info['notes'][:30] if test_info else '',
-                        "#{취약영역}": test_info['notes'][30:60] if test_info else '',
-                        "#{리포트월}": datetime.now().strftime("%Y년 %m월"),
-                        "#{듣기점수}": str(int(avg_scores['listening'])) if avg_scores else '0',
-                        "#{어휘점수}": str(int(avg_scores['vocabulary'])) if avg_scores else '0',
-                        "#{문법점수}": str(int(avg_scores['grammar'])) if avg_scores else '0',
-                        "#{독해점수}": str(int(avg_scores['reading'])) if avg_scores else '0',
-                        "#{AI총평}": (report_info or '')[:100],
-                    }
-                    res = send_comprehensive_alimtalk(api_key, api_secret, from_number, parent_phone, pf_id, template_id, variables)
+                    msg_parts = [f"안녕하세요, {s['name']}학부모님.", "자신감을 키우는 대치앨리영어교육입니다.", ""]
+                    msg_parts.append("📅 이번 주 출석 현황")
+                    if week_att:
+                        for att in week_att:
+                            msg_parts.append(f"• {att['date']} ({att['day_name']}): {att['status']}")
+                    msg_parts.append("")
+                    msg_parts.append("📝 시험결과")
+                    if c_obj:
+                        for area in get_class_areas(c_obj['id']):
+                            sv = st.session_state.get(f"area_score_{area['id']}", "")
+                            if sv:
+                                msg_parts.append(f"• {area['area_name']}: {sv}")
+                    msg_parts.append("")
+                    msg_parts.append("❤️ 대치앨리영어")
+                    msg = "\n".join(msg_parts)
+                    
+                    if template_id:
+                        att_str = " | ".join([f"{a['date']} ({a['day_name']}): {a['status']}" for a in week_att]) if week_att else ""
+                        test_str = ""
+                        if c_obj:
+                            test_lines = []
+                            for area in get_class_areas(c_obj['id']):
+                                sv = st.session_state.get(f"area_score_{area['id']}", "")
+                                if sv:
+                                    test_lines.append(f"{area['area_name']}: {sv}")
+                            test_str = " | ".join(test_lines)
+                        variables = {
+                            "#{학생이름}": s['name'], "#{출석날짜}": att_str, "#{출석상태}": "",
+                            "#{잔여횟수}": "", "#{시험주차}": "", "#{정답률}": test_str,
+                            "#{취약영역}": "", "#{리포트월}": "", "#{듣기점수}": "", "#{어휘점수}": "",
+                            "#{문법점수}": "", "#{독해점수}": "", "#{AI총평}": "",
+                        }
+                        res = send_comprehensive_alimtalk(api_key, api_secret, from_number, parent_phone, pf_id, template_id, variables)
+                    else:
+                        res = send_message(api_key, api_secret, parent_phone, from_number, msg)
                     st.session_state.last_send_result = res
                     st.rerun()
             
@@ -1147,19 +1109,15 @@ elif st.session_state.menu == "📨 알림톡 발송":
                     st.error(res.get("message", "❌ 발송 실패"))
     
     with t2:
-        st.markdown("### 📚 반별 일괄 알림톡 발송")
+        st.markdown("### 📚 반별 일괄 주간 Report 발송")
         all_c = get_all_classes()
         if all_c:
-            sel_class = st.selectbox("반 선택", [c['name'] for c in all_c])
+            sel_class = st.selectbox("반 선택", [c['name'] for c in all_c], key="batch_class")
             c_obj = next(c for c in all_c if c['name'] == sel_class)
             students_in_class = get_students_by_class(c_obj['id'])
-            
             st.markdown(f"**학생 수:** {len(students_in_class)}명")
-            
-            bc1, bc2 = st.columns(2)
-            batch_send_att = bc1.checkbox("✅ 출석 정보 포함", value=True, key="batch_send_att")
-            batch_send_test = bc2.checkbox("📝 시험 결과 포함", value=False, key="batch_send_test")
-            batch_send_report = bc1.checkbox("📊 월간 리포트 포함", value=False, key="batch_send_report")
+            class_areas_batch = get_class_areas(c_obj['id'])
+            st.markdown(f"**등록된 영역:** {', '.join([a['area_name'] for a in class_areas_batch]) if class_areas_batch else '없음'}")
             
             c1, c2 = st.columns(2)
             batch_pf_id = c1.text_input("카카오 채널 ID", value="KA01PF260529142530005vhA1Xuvwf5K", key="batch_pf")
@@ -1168,48 +1126,52 @@ elif st.session_state.menu == "📨 알림톡 발송":
             st.markdown("##### 📱 발송 내용 미리보기 (첫번째 학생 기준)")
             if students_in_class:
                 preview_s = students_in_class[0]
-                preview_parts = [f"[앨리영어] {preview_s['name']} 학생"]
-                if batch_send_att:
-                    preview_parts.append(f"📅 출석정보 포함")
-                if batch_send_test:
-                    preview_parts.append(f"📝 시험정보 포함")
-                if batch_send_report:
-                    preview_parts.append(f"📊 리포트 포함")
-                st.code(" | ".join(preview_parts))
+                week_att_p = get_week_attendance(preview_s['id'])
+                pp = [f"안녕하세요, {preview_s['name']}학부모님.", "자신감을 키우는 대치앨리영어교육입니다.", "", "📅 이번 주 출석 현황"]
+                if week_att_p:
+                    for a in week_att_p:
+                        pp.append(f"• {a['date']} ({a['day_name']}): {a['status']}")
+                pp += ["", "📝 시험결과"]
+                if class_areas_batch:
+                    for a in class_areas_batch:
+                        pp.append(f"• {a['area_name']}: -")
+                pp += ["", "❤️ 대치앨리영어"]
+                st.code("\n".join(pp))
             
             if st.button("📨 반 전체 발송", type="primary", use_container_width=True):
                 success_count = 0
                 fail_count = 0
                 progress_bar = st.progress(0)
                 status_text = st.empty()
-                
-                for i, s in enumerate(students_in_class):
-                    if s['parent_phone']:
-                        status_text.text(f"발송 중: {s['name']} ({i+1}/{len(students_in_class)})")
-                        att = get_attendance_by_date(s["id"], st.session_state.sel_date)
-                        att_status = att['status'] if att else '미입력'
-                        
-                        variables = {
-                            "#{학생이름}": s['name'],
-                            "#{출석날짜}": st.session_state.sel_date,
-                            "#{출석상태}": att_status,
-                            "#{잔여횟수}": str(s['remaining_sessions']),
-                            "#{시험주차}": '', "#{정답률}": '', "#{취약영역}": '',
-                            "#{리포트월}": '', "#{듣기점수}": '0', "#{어휘점수}": '0',
-                            "#{문법점수}": '0', "#{독해점수}": '0', "#{AI총평}": '',
-                        }
-                        
+                for i, stu in enumerate(students_in_class):
+                    if stu['parent_phone']:
+                        status_text.text(f"발송 중: {stu['name']} ({i+1}/{len(students_in_class)})")
+                        week_att_b = get_week_attendance(stu['id'])
+                        msg_parts = [f"안녕하세요, {stu['name']}학부모님.", "자신감을 키우는 대치앨리영어교육입니다.", "", "📅 이번 주 출석 현황"]
+                        if week_att_b:
+                            for a in week_att_b:
+                                msg_parts.append(f"• {a['date']} ({a['day_name']}): {a['status']}")
+                        msg_parts += ["", "📝 시험결과"]
+                        if class_areas_batch:
+                            for a in class_areas_batch:
+                                msg_parts.append(f"• {a['area_name']}: -")
+                        msg_parts += ["", "❤️ 대치앨리영어"]
+                        msg = "\n".join(msg_parts)
                         if batch_template_id:
-                            res = send_comprehensive_alimtalk(api_key, api_secret, from_number, s['parent_phone'], batch_pf_id, batch_template_id, variables)
+                            att_str = " | ".join([f"{a['date']} ({a['day_name']}): {a['status']}" for a in week_att_b]) if week_att_b else ""
+                            test_str = " | ".join([f"{a['area_name']}: -" for a in class_areas_batch]) if class_areas_batch else ""
+                            variables = {
+                                "#{학생이름}": stu['name'], "#{출석날짜}": att_str, "#{출석상태}": "",
+                                "#{잔여횟수}": "", "#{시험주차}": "", "#{정답률}": test_str,
+                                "#{취약영역}": "", "#{리포트월}": "", "#{듣기점수}": "", "#{어휘점수}": "",
+                                "#{문법점수}": "", "#{독해점수}": "", "#{AI총평}": "",
+                            }
+                            res = send_comprehensive_alimtalk(api_key, api_secret, from_number, stu['parent_phone'], batch_pf_id, batch_template_id, variables)
                         else:
-                            msg = f"[앨리영어] {s['name']} 학생 {st.session_state.sel_date} 출석: {att_status} (잔여 {s['remaining_sessions']}회)"
-                            res = send_message(api_key, api_secret, s['parent_phone'], from_number, msg)
-                        
+                            res = send_message(api_key, api_secret, stu['parent_phone'], from_number, msg)
                         if res.get("success"): success_count += 1
                         else: fail_count += 1
-                    
                     progress_bar.progress((i + 1) / len(students_in_class))
-                
                 status_text.text(f"✅ 완료! 성공: {success_count}건, 실패: {fail_count}건")
                 st.balloons()
         else:
@@ -1228,14 +1190,16 @@ elif st.session_state.menu == "📨 알림톡 발송":
                     </div>
                 </div>
                 <div style="border-top: 1px solid #eee; padding-top: 12px;">
-                    <p><b>#{학생이름}</b> 학부모님께</p>
-                    <p>📅 #{출석날짜} 출석: #{출석상태} (잔여 #{잔여횟수}회)</p>
-                    <p>📝 #{시험주차} 결과: #{정답률} | 취약: #{취약영역}</p>
-                    <p>📊 #{리포트월} 성적: 듣기#{듣기점수} 어휘#{어휘점수} 문법#{문법점수} 독해#{독해점수}</p>
-                    <div style="background: #FFF5F8; padding: 10px; border-radius: 10px; font-size: 0.85rem;">
-                        💡 #{AI총평}
-                    </div>
-                    <p style="text-align: right; font-size: 0.8rem; color: #888; margin-top: 12px;">❤️ 대치앨리영어</p>
+                    <p>안녕하세요, <b>#{학생이름}</b>학부모님.</p>
+                    <p>자신감을 키우는 대치앨리영어교육입니다.</p>
+                    <br>
+                    <p>📅 <b>이번 주 출석 현황</b></p>
+                    <p>#{출석날짜}</p>
+                    <br>
+                    <p>📝 <b>시험결과</b></p>
+                    <p>#{정답률}</p>
+                    <br>
+                    <p style="text-align: right; font-size: 0.8rem; color: #888;">❤️ 대치앨리영어</p>
                 </div>
             </div>
         </div>
